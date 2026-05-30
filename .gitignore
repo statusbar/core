@@ -1,0 +1,33 @@
+**/__pycache__/
+build-*/
+build/
+deb-output/
+
+# CMake / Ninja in-source artifacts (shouldn't happen, but cheap to guard)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+Testing/
+
+# Coverage / profiling
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+
+# Editor / IDE
+.vscode/
+.idea/
+.cache/
+.claude/settings.local.json
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Python tooling
+*.pyc

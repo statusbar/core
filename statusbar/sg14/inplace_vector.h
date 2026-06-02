@@ -42,7 +42,12 @@
 
 #ifndef SG14_INPLACE_VECTOR_THROW
 #    include <stdexcept>
-#    define SG14_INPLACE_VECTOR_THROW(x) throw(x)
+#    if __cpp_exceptions
+#        define SG14_INPLACE_VECTOR_THROW(x) throw(x)
+#    else
+#        include <exception>
+#        define SG14_INPLACE_VECTOR_THROW(x) (static_cast<void>(x), std::terminate())
+#    endif
 #endif
 
 #ifndef SG14_INPLACE_VECTOR_TRIVIALLY_RELOCATABLE_IF
@@ -542,13 +547,17 @@ class inplace_vector
         // Open a window and fill in-place; if filling fails, close the window again.
         if constexpr (std::is_trivially_relocatable_v<value_type>) {
             std::uninitialized_relocate_backward(it, oldend, oldend + n);
+#    if __cpp_exceptions
             try {
+#    endif
                 std::uninitialized_fill_n(it, n, value);
                 set_size_(size_ + n);
+#    if __cpp_exceptions
             } catch (...) {
                 std::uninitialized_relocate(it + n, oldend + n, it);
                 throw;
             }
+#    endif
             return it;
         }
 #endif
@@ -575,13 +584,17 @@ class inplace_vector
             // Open a window and fill in-place; if filling fails, close the window again.
             if constexpr (std::is_trivially_relocatable_v<value_type>) {
                 std::uninitialized_relocate_backward(it, oldend, oldend + n);
+#    if __cpp_exceptions
                 try {
+#    endif
                     std::uninitialized_copy_n(first, n, it);
                     set_size_(size_ + n);
+#    if __cpp_exceptions
                 } catch (...) {
                     std::uninitialized_relocate(it + n, oldend + n, it);
                     throw;
                 }
+#    endif
                 return it;
             }
 #endif
@@ -615,13 +628,17 @@ class inplace_vector
             // Open a window and fill in-place; if filling fails, close the window again.
             if constexpr (std::is_trivially_relocatable_v<value_type>) {
                 std::uninitialized_relocate_backward(it, oldend, oldend + n);
+#        if __cpp_exceptions
                 try {
+#        endif
                     std::ranges::uninitialized_copy_n(std::ranges::begin(rg), n, it, std::unreachable_sentinel);
                     set_size_(size_ + n);
+#        if __cpp_exceptions
                 } catch (...) {
                     std::uninitialized_relocate(it + n, oldend + n, it);
                     throw;
                 }
+#        endif
                 return it;
             }
 #    endif

@@ -33,7 +33,12 @@
 #include <utility>
 
 #ifndef SG14_INPLACE_FUNCTION_THROW
-#    define SG14_INPLACE_FUNCTION_THROW(x) throw(x)
+#    if __cpp_exceptions
+#        define SG14_INPLACE_FUNCTION_THROW(x) throw(x)
+#    else
+#        include <exception>
+#        define SG14_INPLACE_FUNCTION_THROW(x) (static_cast<void>(x), std::terminate())
+#    endif
 #endif
 
 namespace statusbar::sg14 {

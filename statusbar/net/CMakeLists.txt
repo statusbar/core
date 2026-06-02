@@ -27,6 +27,7 @@ statusbar_add_module(
   statusbar-itc
   TESTS
   net_cbpf_emit_test.cpp
+  net_zephyr_eth_concept_test.cpp
   net_compiled_rule_test.cpp
   net_ethernet_port_test.cpp
   net_linux_xdp_test.cpp

@@ -5,6 +5,8 @@
 
 #include "statusbar/realtime/realtime_tripwire.hpp"
 
+#include "statusbar/status/catch_or_status.hpp"
+
 namespace statusbar::realtime {
 
 auto build_trace_arg_specs(TraceConfig& config) -> statusbar::args::ArgumentSpecs
@@ -49,6 +51,11 @@ auto monitor_tripwire(
     int poll_interval_us) -> std::thread
 {
     return std::thread([&controller, &tripwire, shutdown_token, running_flag, poll_interval_us]() -> void {
+        // Exception barrier: a thread entry must never let an exception escape
+        // (that calls std::terminate and aborts the process). The body is
+        // effectively no-throw today, but run_guarded keeps it that way if a
+        // future change introduces a throwing call.
+        run_guarded("rt tripwire monitor", [&]() -> void {
         // Poll event_ready() (the triple buffer's can_consume) rather
         // than has_fired(): can_consume only flips true after the
         // producer's publish() completes, so the consumed event is
@@ -93,6 +100,7 @@ auto monitor_tripwire(
         }
 
         controller.capture(buf);
+        });
     });
 }
 

@@ -56,6 +56,7 @@ endif()
 add_subdirectory(colbin)
 add_subdirectory(csv)
 add_subdirectory(itc)
+add_subdirectory(mem)
 add_subdirectory(net)
 add_subdirectory(realtime)
 add_subdirectory(sm)
@@ -86,6 +87,7 @@ if(NOT STATUSBAR_AGGREGATE_BUILD)
               statusbar-colbin
               statusbar-csv
               statusbar-itc
+              statusbar-mem
               statusbar-net
               statusbar-realtime
               statusbar-sm

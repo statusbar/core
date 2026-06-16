@@ -27,6 +27,28 @@ if(NOT STATUSBAR_AGGREGATE_BUILD)
   add_custom_target(run-all-benches)
 endif()
 
+# Hardened build: STATUSBAR_ASSERT() traps on a violated precondition even in
+# release (defense in depth; default is [[assume]] under NDEBUG). For aggregate
+# builds the umbrella declares this option and applies the definition globally;
+# here it covers the standalone statusbar-core build.
+if(NOT STATUSBAR_AGGREGATE_BUILD)
+  option(ENABLE_HARDENING
+         "Make STATUSBAR_ASSERT trap on violation in all builds (defense in depth)"
+         OFF)
+  if(ENABLE_HARDENING)
+    add_compile_definitions(STATUSBAR_HARDENED)
+  endif()
+
+  # See the umbrella CMakeLists for rationale. OFF = full local-capture
+  # visibility node (no qdisc bypass + promiscuous RawnetContext sockets).
+  option(ENABLE_PACKET_QDISC_BYPASS
+         "Use PACKET_QDISC_BYPASS for opted-in TX sockets (OFF = all TX visible to local capture + promiscuous RX)"
+         ON)
+  if(NOT ENABLE_PACKET_QDISC_BYPASS)
+    add_compile_definitions(STATUSBAR_NO_QDISC_BYPASS)
+  endif()
+endif()
+
 add_subdirectory(statusbar)
 
 # EXPORT_NAME for each module target is set by statusbar_add_module() in
@@ -148,9 +170,11 @@ if(NOT STATUSBAR_AGGREGATE_BUILD)
   # -dev's cmake config exports IMPORTED targets pointing at runtime binaries
   # (statusbar-net-tcp-echo-example etc.), so installing -dev without the
   # runtime breaks find_package() on the consumer side.
+  # >= (not =) so an auto-incremented Debian revision (1.1.0-<rev>, see the
+  # container-build scripts) still satisfies the runtime dependency.
   set(CPACK_DEBIAN_DEVEL_PACKAGE_DEPENDS
-      "statusbar-core (= ${PROJECT_VERSION})")
-  set(CPACK_RPM_DEVEL_PACKAGE_REQUIRES "statusbar-core = ${PROJECT_VERSION}")
+      "statusbar-core (>= ${PROJECT_VERSION})")
+  set(CPACK_RPM_DEVEL_PACKAGE_REQUIRES "statusbar-core >= ${PROJECT_VERSION}")
   set(CPACK_COMPONENT_DEVEL_DESCRIPTION
       "C++ headers, static libraries and CMake package config")
   set(CPACK_GENERATOR "TGZ;ZIP")

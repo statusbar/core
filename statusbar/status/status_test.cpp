@@ -4,10 +4,12 @@
 #include "statusbar/status/status.hpp"
 
 #include "statusbar/buffer/buffer.hpp"
+#include "statusbar/status/catch_or_status.hpp"
 #include "statusbar/test/test.hpp"
 
 #include <cstdlib>
 #include <expected>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 
@@ -215,6 +217,68 @@ TEST(statusbar_status, failure_custom_enum_preserves_value)
 
     // Error messages should be different
     EXPECT_NE(s1.error().message(), s2.error().message());
+}
+
+//
+// catch_or_status / run_guarded Tests
+//
+TEST(statusbar_status, catch_or_status_forwards_success)
+{
+    StatusValue<int> r = catch_or_status([]() -> StatusValue<int> { return success(42); }, std::errc::io_error);
+    EXPECT_TRUE(r);
+    EXPECT_EQ(*r, 42);
+}
+
+TEST(statusbar_status, catch_or_status_forwards_value_status)
+{
+    Status r = catch_or_status([]() -> Status { return success(); }, std::errc::io_error);
+    EXPECT_TRUE(r);
+}
+
+TEST(statusbar_status, catch_or_status_forwards_failure_unchanged)
+{
+    StatusValue<int> r =
+        catch_or_status([]() -> StatusValue<int> { return failure(std::errc::permission_denied); }, std::errc::io_error);
+    EXPECT_FALSE(r);
+    EXPECT_EQ(r.error(), std::errc::permission_denied);
+}
+
+#if __cpp_exceptions
+TEST(statusbar_status, catch_or_status_maps_exception_to_ec)
+{
+    StatusValue<int> r = catch_or_status(
+        []() -> StatusValue<int> { throw std::runtime_error("boom"); }, std::errc::invalid_argument);
+    EXPECT_FALSE(r);
+    EXPECT_EQ(r.error(), std::errc::invalid_argument);
+}
+
+TEST(statusbar_status, catch_or_status_preserves_system_error_code)
+{
+    // A std::system_error keeps its code() — round-trips throw_or_abort(ec).
+    auto const original = std::make_error_code(std::errc::no_such_file_or_directory);
+    StatusValue<int> r = catch_or_status(
+        [original]() -> StatusValue<int> { throw std::system_error(original); }, std::errc::io_error);
+    EXPECT_FALSE(r);
+    EXPECT_EQ(r.error(), original);
+}
+
+TEST(statusbar_status, run_guarded_swallows_exception)
+{
+    // A throwing body must not propagate (which would std::terminate).
+    bool ran = false;
+    run_guarded("test thread", [&]() {
+        ran = true;
+        throw std::runtime_error("boom");
+    });
+    EXPECT_TRUE(ran);  // reached the throw, and control returned here normally
+}
+#endif
+
+TEST(statusbar_status, run_guarded_runs_normal_body)
+{
+    int value = 0;
+    run_guarded("test thread", [&]() { value = 7; });
+    EXPECT_EQ(value, 7);
 }
 
 //

@@ -34,6 +34,7 @@
 #include "statusbar/ieee/ieee.hpp"
 #include "statusbar/net/net_error.hpp"
 #include "statusbar/net/net_socket.hpp"
+#include "statusbar/sg14/inplace_function.h"
 #include "statusbar/status/status.hpp"
 
 #include <array>
@@ -94,12 +95,14 @@ class RawnetContext
         , interface_index_{other.interface_index_}
         , my_mac_{other.my_mac_}
         , default_dest_mac_{other.default_dest_mac_}
+        , tx_tap_{std::move(other.tx_tap_)}
 #if defined(__APPLE__)
         , bpf_buffer_size_{other.bpf_buffer_size_}
 #endif
     {
         other.fd_ = -1;
         other.interface_index_ = -1;
+        other.tx_tap_ = {};
     }
 
     auto operator=(RawnetContext&& other) noexcept -> RawnetContext&;
@@ -108,9 +111,17 @@ class RawnetContext
     /// @param interface_name Network interface name (e.g., "en0", "eth0")
     /// @param ethertype EtherType to filter/use (e.g., 0x88f7 for gPTP)
     /// @param multicast_mac Optional multicast MAC address to join (nullptr = none)
+    /// @param qdisc_bypass Set PACKET_QDISC_BYPASS for lower TX latency. OFF by
+    ///        default. Note: bypass does NOT drop frames — they still reach the
+    ///        wire — but it skips the egress tap, so bypass frames are invisible
+    ///        to tcpdump/AF_PACKET on the *sending* host. Default-off keeps local
+    ///        capture working; enable only for latency-critical TX.
     /// @return Status indicating success or failure
-    [[nodiscard]] auto open(std::string_view interface_name, uint16_t ethertype, Eui48 const* multicast_mac = nullptr) noexcept
-        -> Status;
+    [[nodiscard]] auto open(
+        std::string_view interface_name,
+        uint16_t ethertype,
+        Eui48 const* multicast_mac = nullptr,
+        bool qdisc_bypass = false) noexcept -> Status;
 
     /// Close the socket
     void close() noexcept;
@@ -126,6 +137,23 @@ class RawnetContext
     /// @return Number of bytes sent, or error
     [[nodiscard]] auto send(Eui48 const* dest_mac, std::span<uint8_t const> payload) noexcept -> StatusValue<ssize_t>;
 
+    /// Send an Ethernet frame carrying a single 802.1Q VLAN tag.
+    ///
+    /// AVB stream (AVTP) frames MUST be VLAN-tagged with the SR class VID and the
+    /// SR class priority in the PCP field: bridges classify a frame into an SR
+    /// class (and its credit-based shaper / reserved bandwidth) by the PCP of its
+    /// VLAN tag, and per IEEE 802.1Q an untagged frame is not part of any SR
+    /// class. The frame is built as
+    /// [dst][src][TPID=0x8100][TCI=pcp<<13|vid][ethertype][payload].
+    ///
+    /// @param dest_mac Destination MAC address (nullptr = use default)
+    /// @param payload Payload data (without Ethernet header or VLAN tag)
+    /// @param vlan_id 12-bit VLAN ID (VID)
+    /// @param pcp 3-bit priority code point (SR class priority)
+    /// @return Number of payload bytes sent, or error
+    [[nodiscard]] auto send_vlan(Eui48 const* dest_mac, std::span<uint8_t const> payload, uint16_t vlan_id, uint8_t pcp) noexcept
+        -> StatusValue<ssize_t>;
+
     /// Receive an Ethernet frame
     /// @param src_mac Output: source MAC address
     /// @param dest_mac Output: destination MAC address
@@ -137,6 +165,15 @@ class RawnetContext
     /// @param multicast_mac Multicast MAC address to join
     /// @return Status indicating success or failure
     [[nodiscard]] auto join_multicast(Eui48 const& multicast_mac) const noexcept -> Status;
+
+    /// Leave a multicast group previously joined with join_multicast().
+    /// Symmetric to join_multicast (PACKET_DROP_MEMBERSHIP on Linux). Used to
+    /// release a remote talker's stream group when a listener disconnects, so
+    /// per-connection dest-MAC churn (e.g. a Meyer Galaxy) does not accumulate
+    /// stale NIC multicast filter entries.
+    /// @param multicast_mac Multicast MAC address to leave
+    /// @return Status indicating success or failure
+    [[nodiscard]] auto leave_multicast(Eui48 const& multicast_mac) const noexcept -> Status;
 
     /// Check if the socket is valid
     [[nodiscard]] auto valid() const noexcept -> bool { return fd_ >= 0; }
@@ -160,6 +197,16 @@ class RawnetContext
     /// @param mac MAC address to use as the default destination
     void set_default_dest_mac(Eui48 const& mac) noexcept { default_dest_mac_ = mac; }
 
+    /// Optional egress tap. When set, it is invoked with the EXACT bytes handed to
+    /// sendto (full L2 frame, VLAN tag included) on every successful send_vlan().
+    /// This is the only way to observe a PACKET_QDISC_BYPASS stream's own egress
+    /// (a co-located capture never sees it). The callback runs inline on the
+    /// caller's thread -- which for the stream TX path is the media-timer RT thread
+    /// -- so it MUST be non-blocking (e.g. an in-memory recorder). Cleared by
+    /// default; passing a default-constructed function disables it.
+    using TxTap = statusbar::sg14::inplace_function<void(std::span<uint8_t const>), 32>;
+    void set_tx_tap(TxTap tap) noexcept { tx_tap_ = std::move(tap); }
+
 #if defined(__APPLE__)
     /// Get the BPF buffer size (macOS only)
     [[nodiscard]] auto bpf_buffer_size() const noexcept -> size_t { return bpf_buffer_size_; }
@@ -171,6 +218,7 @@ class RawnetContext
     int interface_index_{-1};
     Eui48 my_mac_{};
     Eui48 default_dest_mac_{};
+    TxTap tx_tap_{};
 
 #if defined(__APPLE__)
     size_t bpf_buffer_size_{0};

@@ -26,10 +26,28 @@ struct WriterConfig
 
     /// Hard upper bound on mmap region size. `write_row` returns
     /// `capacity_exceeded` if a grow would exceed this. Default 64 GiB.
+    /// When `preallocate` is set this is the EXACT size mapped up front.
     uint64_t max_capacity_bytes{64ULL * 1024 * 1024 * 1024};
 
     /// Growth factor applied each time the mmap region fills. Default 2.
+    /// Ignored when `preallocate` is set (the region never grows).
     uint32_t grow_factor{2};
+
+    /// Fully pre-allocate `max_capacity_bytes` at `create` and NEVER grow:
+    /// the file is `ftruncate`d to the full size, its blocks are reserved
+    /// (`posix_fallocate`, best-effort), and the mapping is pre-faulted
+    /// (`MAP_POPULATE` on Linux). `write_row` then returns `capacity_exceeded`
+    /// once the region is full — it never calls `mremap`.
+    ///
+    /// Use this on real-time recording paths. A mid-run `mremap` of a large
+    /// file-backed region takes the kernel's mmap_lock and can stall sibling
+    /// threads (e.g. the data plane) for tens-to-hundreds of ms; pre-allocating
+    /// moves that one-time cost to `create`, before streaming starts. The
+    /// caller MUST size `max_capacity_bytes` for the whole run
+    /// (≈ duration × row_rate × row_size, plus headroom). On a tmpfs/RAM
+    /// filesystem the full size is reserved in RAM immediately, so an
+    /// over-large value fails fast at `create` instead of OOM-ing mid-run.
+    bool preallocate{false};
 };
 
 /// Linux-only mmap-append writer for the .colbin format.
@@ -87,6 +105,7 @@ class Writer
     uint64_t cursor_{0};  ///< absolute byte offset within mapped region
     uint64_t max_capacity_{0};
     uint32_t grow_factor_{2};
+    bool fixed_capacity_{false};  ///< preallocate mode: never grow, fail with capacity_exceeded
     uint32_t header_total_{0};
     uint32_t row_size_{0};
     uint64_t row_count_{0};

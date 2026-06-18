@@ -210,6 +210,56 @@ TEST(colbin_writer_reader, grow_across_mremap_boundary)
     EXPECT_EQ(last.sequence, n_rows - 1);
 }
 
+TEST(colbin_writer_reader, preallocate_fixed_capacity_never_grows)
+{
+    // Preallocate mode maps max_capacity_bytes in full at create and never
+    // grows: write_row fills it, then returns capacity_exceeded (no mremap).
+    ScratchPath sp;
+    auto cols = sample_schema();
+    cb::WriterConfig cfg;
+    cfg.preallocate = true;
+    cfg.max_capacity_bytes = 64ULL * 1024;  // 64 KiB, page-aligned
+
+    uint64_t fits = 0;
+    {
+        auto w_or = cb::Writer::create(sp.path, cols, cfg);
+        EXPECT_TRUE(w_or.has_value());
+        auto w = std::move(*w_or);
+
+        // The file is fully pre-allocated up front (not lazily grown): its size
+        // is already the requested capacity before a single row is written.
+        EXPECT_EQ(std::filesystem::file_size(sp.path), uint64_t{64} * 1024);
+
+        fits = (uint64_t{64} * 1024 - w.header_size()) / w.row_size();
+        for (uint64_t i = 0; i < fits; ++i) {
+            SampleRow row{};
+            row.sequence = static_cast<uint32_t>(i);
+            row.role = 2;
+            auto s = w.write_row(std::span<uint8_t const>{reinterpret_cast<uint8_t const*>(&row), sizeof(row)});
+            EXPECT_TRUE(s.has_value());
+        }
+        // The region is full; the next write must fail with capacity_exceeded
+        // rather than growing the mapping.
+        SampleRow overflow{};
+        auto s = w.write_row(std::span<uint8_t const>{reinterpret_cast<uint8_t const*>(&overflow), sizeof(overflow)});
+        EXPECT_FALSE(s.has_value());
+        EXPECT_EQ(s.error(), cb::make_error_code(cb::ColbinError::capacity_exceeded));
+
+        // It never grew past the preallocated size.
+        EXPECT_EQ(std::filesystem::file_size(sp.path), uint64_t{64} * 1024);
+        (void)w.commit();
+    }
+
+    // On close the file is trimmed to the high-water mark and reads back the
+    // rows that fit.
+    auto r_or = cb::Reader::open(sp.path);
+    EXPECT_TRUE(r_or.has_value());
+    EXPECT_EQ(r_or->row_count(), fits);
+    SampleRow last{};
+    std::memcpy(&last, r_or->row(fits - 1).data(), sizeof(last));
+    EXPECT_EQ(last.sequence, static_cast<uint32_t>(fits - 1));
+}
+
 TEST(colbin_writer_reader, reopen_appends_after_commit)
 {
     ScratchPath sp;

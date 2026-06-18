@@ -186,14 +186,18 @@ auto Writer::create(std::filesystem::path const& path, std::span<ColumnSpec cons
         }
     }
 
-    // Compute initial mmap size and ftruncate to it. Make sure we
-    // include enough room for at least one row beyond the existing
-    // content (so writers that resume an existing file don't have to
-    // grow immediately).
+    // Compute the mmap size and ftruncate to it. Normal mode starts at
+    // initial_capacity_bytes (with room for at least one row past any existing
+    // content, so a resumed file need not grow immediately) and grows on
+    // demand. Preallocate mode maps the FULL max_capacity_bytes up front and
+    // never grows — no mid-run mremap.
     uint64_t const page = page_size_bytes();
     uint64_t const cur_size = static_cast<uint64_t>(::lseek(fd, 0, SEEK_END));
-    uint64_t mapped_size = round_up(std::max<uint64_t>(cfg.initial_capacity_bytes, cur_size + resolved.row_size), page);
-    if (mapped_size > cfg.max_capacity_bytes) {
+    uint64_t const cap_rounded = round_up(cfg.max_capacity_bytes, page);
+    uint64_t mapped_size = cfg.preallocate
+        ? cap_rounded
+        : round_up(std::max<uint64_t>(cfg.initial_capacity_bytes, cur_size + resolved.row_size), page);
+    if (mapped_size < cur_size + resolved.row_size || mapped_size > cap_rounded) {
         ::close(fd);
         return std::unexpected{make_error_code(ColbinError::capacity_exceeded)};
     }
@@ -203,11 +207,34 @@ auto Writer::create(std::filesystem::path const& path, std::span<ColumnSpec cons
             ::close(fd);
             return std::unexpected{ec};
         }
+#if defined(__linux__)
+        if (cfg.preallocate) {
+            // Reserve the backing blocks now so we fail fast (e.g. a tmpfs that
+            // cannot hold the whole run) at create instead of OOM-ing or
+            // SIGBUS-ing mid-stream. Best-effort: filesystems without fallocate
+            // (EOPNOTSUPP/ENOSYS) fall back to the sparse ftruncate above.
+            // posix_fallocate is Linux-only here; other platforms get the
+            // sparse mapping (host-side test builds, not the deployed target).
+            int const rc = ::posix_fallocate(fd, 0, static_cast<off_t>(mapped_size));
+            if (rc != 0 && rc != EOPNOTSUPP && rc != ENOSYS) {
+                ::close(fd);
+                return std::unexpected{std::error_code{rc, std::generic_category()}};
+            }
+        }
+#endif
     } else {
         mapped_size = cur_size;
     }
 
-    void* mapped = ::mmap(nullptr, mapped_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    int mmap_flags = MAP_SHARED;
+#if defined(__linux__)
+    if (cfg.preallocate) {
+        // Pre-fault the whole mapping at create so no page fault lands on the
+        // hot write_row path. MAP_POPULATE is best-effort and never fails mmap.
+        mmap_flags |= MAP_POPULATE;
+    }
+#endif
+    void* mapped = ::mmap(nullptr, mapped_size, PROT_READ | PROT_WRITE, mmap_flags, fd, 0);
     if (mapped == MAP_FAILED) {
         auto const ec = io_failure();
         ::close(fd);
@@ -233,6 +260,7 @@ auto Writer::create(std::filesystem::path const& path, std::span<ColumnSpec cons
     w.cursor_ = cursor;
     w.max_capacity_ = cfg.max_capacity_bytes;
     w.grow_factor_ = cfg.grow_factor < 2 ? 2 : cfg.grow_factor;
+    w.fixed_capacity_ = cfg.preallocate;
     w.header_total_ = header_total;
     w.row_size_ = resolved.row_size;
     w.row_count_ = committed;
@@ -247,6 +275,7 @@ Writer::Writer(Writer&& other) noexcept
     , cursor_(other.cursor_)
     , max_capacity_(other.max_capacity_)
     , grow_factor_(other.grow_factor_)
+    , fixed_capacity_(other.fixed_capacity_)
     , header_total_(other.header_total_)
     , row_size_(other.row_size_)
     , row_count_(other.row_count_)
@@ -267,6 +296,7 @@ auto Writer::operator=(Writer&& other) noexcept -> Writer&
         cursor_ = other.cursor_;
         max_capacity_ = other.max_capacity_;
         grow_factor_ = other.grow_factor_;
+        fixed_capacity_ = other.fixed_capacity_;
         header_total_ = other.header_total_;
         row_size_ = other.row_size_;
         row_count_ = other.row_count_;
@@ -356,6 +386,11 @@ auto Writer::write_row(std::span<uint8_t const> row) noexcept -> Status
         return failure(make_error_code(ColbinError::invalid_schema));
     }
     if (cursor_ + row_size_ > mapped_size_) [[unlikely]] {
+        if (fixed_capacity_) {
+            // Preallocate mode: the region is fixed; never mremap on the hot
+            // path. The caller sized max_capacity_bytes for the run.
+            return failure(make_error_code(ColbinError::capacity_exceeded));
+        }
         if (auto s = grow(); !s) {
             return s;
         }

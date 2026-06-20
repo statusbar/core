@@ -12,6 +12,7 @@
 #include "statusbar/status/status.hpp"
 
 #include <cstdlib>
+#include <span>
 #include <string_view>
 #include <type_traits>
 
@@ -22,6 +23,17 @@ using HelpCallback = void (*)(char const* program_name, args::ArgumentSpecs cons
 
 /// Default help callback that prints usage and options to stderr
 auto default_print_usage(char const* program_name, args::ArgumentSpecs const& specs) -> void;
+
+/// Render usage with an optional one-line/multi-line description and a list of
+/// example invocations. Each example is printed as `  {program_name} {example}`
+/// (so callers pass only the argument portion). All output goes to stderr.
+/// Lets a tool's `print_usage` shrink to a single call instead of re-emitting
+/// the Usage/Options/format_help/Examples skeleton.
+auto default_print_usage(
+    char const* program_name,
+    args::ArgumentSpecs const& specs,
+    std::string_view description,
+    std::span<std::string_view const> examples = {}) -> void;
 
 /// Check for --completion option and output shell completion script if requested
 [[nodiscard]] auto handle_completion(Config const& config, args::ArgumentSpecs const& specs, std::string_view program_path) -> bool;

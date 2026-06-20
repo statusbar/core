@@ -15,6 +15,7 @@
 #include <format>
 #include <iterator>
 #include <print>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -75,6 +76,30 @@ void default_print_usage(char const* program_name, args::ArgumentSpecs const& sp
     std::string help;
     specs.format_help_to(std::back_inserter(help));
     std::print(stderr, "{}", help);
+}
+
+void default_print_usage(
+    char const* program_name,
+    args::ArgumentSpecs const& specs,
+    std::string_view description,
+    std::span<std::string_view const> examples)
+{
+    std::print(stderr, "Usage: {} [options]\n", program_name);
+    if (!description.empty()) {
+        std::print(stderr, "\n{}\n", description);
+    }
+    std::print(stderr, "\nOptions:\n");
+
+    std::string help;
+    specs.format_help_to(std::back_inserter(help));
+    std::print(stderr, "{}", help);
+
+    if (!examples.empty()) {
+        std::print(stderr, "\nExamples:\n");
+        for (auto const& example : examples) {
+            std::print(stderr, "  {} {}\n", program_name, example);
+        }
+    }
 }
 
 namespace {

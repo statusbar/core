@@ -40,7 +40,8 @@ template <typename Fn>
 [[nodiscard]] auto catch_or_status(Fn&& fn, std::error_code ec_on_exception) noexcept -> std::invoke_result_t<Fn>
 {
     using Result = std::invoke_result_t<Fn>;
-    static_assert(std::is_constructible_v<Result, std::unexpected<std::error_code>>,
+    static_assert(
+        std::is_constructible_v<Result, std::unexpected<std::error_code>>,
         "catch_or_status: fn must return a Status or StatusValue<T> (constructible from statusbar::failure(...))");
 #if __cpp_exceptions
     try {
@@ -76,8 +77,7 @@ void run_guarded(std::string_view thread_name, Fn&& fn) noexcept
     try {
         std::forward<Fn>(fn)();
     } catch (std::exception const& e) {
-        std::fprintf(
-            stderr, "%.*s exited via exception: %s\n", static_cast<int>(thread_name.size()), thread_name.data(), e.what());
+        std::fprintf(stderr, "%.*s exited via exception: %s\n", static_cast<int>(thread_name.size()), thread_name.data(), e.what());
     } catch (...) {
         std::fprintf(stderr, "%.*s exited via unknown exception\n", static_cast<int>(thread_name.size()), thread_name.data());
     }

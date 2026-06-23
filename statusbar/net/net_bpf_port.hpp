@@ -125,11 +125,10 @@ class BpfPortContext
 
         launch_times_[static_cast<size_t>(handle)] = launch_time_ns;
 
-        return success(
-            EthernetTxSlot{
-                .handle = handle,
-                .buffer = make_span(pool_[static_cast<size_t>(handle)]),
-            });
+        return success(EthernetTxSlot{
+            .handle = handle,
+            .buffer = make_span(pool_[static_cast<size_t>(handle)]),
+        });
     }
 
     /// @param handle Opaque slot handle from tx_start()

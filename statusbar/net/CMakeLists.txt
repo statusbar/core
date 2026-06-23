@@ -30,6 +30,7 @@ statusbar_add_module(
   net_zephyr_eth_concept_test.cpp
   net_compiled_rule_test.cpp
   net_ethernet_port_test.cpp
+  net_link_monitor_test.cpp
   net_linux_xdp_test.cpp
   net_tcam_classifier_test.cpp
   net_test.cpp

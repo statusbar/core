@@ -75,11 +75,10 @@ auto TestPortContext::tx_start(int64_t launch_time_ns) -> StatusValue<EthernetTx
 
     launch_times_[static_cast<size_t>(handle)] = launch_time_ns;
 
-    return success(
-        EthernetTxSlot{
-            .handle = handle,
-            .buffer = make_span(pool_[static_cast<size_t>(handle)]),
-        });
+    return success(EthernetTxSlot{
+        .handle = handle,
+        .buffer = make_span(pool_[static_cast<size_t>(handle)]),
+    });
 }
 
 auto TestPortContext::tx_cancel(uint64_t handle) -> Status
@@ -100,12 +99,11 @@ auto TestPortContext::rx_start() -> StatusValue<std::optional<EthernetRxSlot>>
     RxEntry const entry = rx_queue_.front();
     rx_queue_.erase(rx_queue_.begin());
 
-    return success(
-        std::optional<EthernetRxSlot>{EthernetRxSlot{
-            .handle = entry.pool_index,
-            .buffer = make_const_span(pool_[static_cast<size_t>(entry.pool_index)]).first(entry.frame_length),
-            .timestamp_ns = entry.timestamp_ns,
-        }});
+    return success(std::optional<EthernetRxSlot>{EthernetRxSlot{
+        .handle = entry.pool_index,
+        .buffer = make_const_span(pool_[static_cast<size_t>(entry.pool_index)]).first(entry.frame_length),
+        .timestamp_ns = entry.timestamp_ns,
+    }});
 }
 
 auto TestPortContext::rx_release(uint64_t handle) -> Status
@@ -146,12 +144,11 @@ auto TestPortContext::inject_rx(std::span<uint8_t const> frame, int64_t timestam
     auto& buf = pool_[static_cast<size_t>(handle)];
     std::copy_n(frame.data(), copy_len, buf.data());
 
-    rx_queue_.push_back(
-        RxEntry{
-            .pool_index = handle,
-            .frame_length = copy_len,
-            .timestamp_ns = timestamp_ns,
-        });
+    rx_queue_.push_back(RxEntry{
+        .pool_index = handle,
+        .frame_length = copy_len,
+        .timestamp_ns = timestamp_ns,
+    });
 
     return success();
 }

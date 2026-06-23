@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "statusbar/mem/mem_pmr_unique.hpp"
+
 #include "statusbar/test/test.hpp"
 
 #include <cstddef>

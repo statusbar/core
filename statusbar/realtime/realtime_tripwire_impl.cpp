@@ -4,7 +4,6 @@
 /// Implementation of large non-template functions extracted from realtime_tripwire.hpp
 
 #include "statusbar/realtime/realtime_tripwire.hpp"
-
 #include "statusbar/status/catch_or_status.hpp"
 
 namespace statusbar::realtime {
@@ -56,50 +55,50 @@ auto monitor_tripwire(
         // effectively no-throw today, but run_guarded keeps it that way if a
         // future change introduces a throwing call.
         run_guarded("rt tripwire monitor", [&]() -> void {
-        // Poll event_ready() (the triple buffer's can_consume) rather
-        // than has_fired(): can_consume only flips true after the
-        // producer's publish() completes, so the consumed event is
-        // always whole — no torn read between the latch and payload.
-        while (!tripwire.event_ready()) {
-            // Local running flag allows direct stop() without global shutdown
-            if (running_flag != nullptr && !running_flag->load(std::memory_order_acquire)) {
-                break;
+            // Poll event_ready() (the triple buffer's can_consume) rather
+            // than has_fired(): can_consume only flips true after the
+            // producer's publish() completes, so the consumed event is
+            // always whole — no torn read between the latch and payload.
+            while (!tripwire.event_ready()) {
+                // Local running flag allows direct stop() without global shutdown
+                if (running_flag != nullptr && !running_flag->load(std::memory_order_acquire)) {
+                    break;
+                }
+                // Stop token signals shutdown
+                if (shutdown_token != nullptr && shutdown_token->stop_requested()) {
+                    break;
+                }
+                ::usleep(static_cast<useconds_t>(poll_interval_us));
             }
-            // Stop token signals shutdown
-            if (shutdown_token != nullptr && shutdown_token->stop_requested()) {
-                break;
+
+            if (!tripwire.event_ready()) {
+                return;  // Clean shutdown without the tripwire firing
             }
-            ::usleep(static_cast<useconds_t>(poll_interval_us));
-        }
 
-        if (!tripwire.event_ready()) {
-            return;  // Clean shutdown without the tripwire firing
-        }
+            TripwireEvent const ev = tripwire.consume_event();
 
-        TripwireEvent const ev = tripwire.consume_event();
+            char buf[256];
+            if (ev.fired_on_duration) {
+                std::snprintf(
+                    buf,
+                    sizeof(buf),
+                    "rt_duration_exceeded tick=%" PRIu64 " duration_ns=%" PRId64 " duration_us=%.3f",
+                    ev.tick,
+                    ev.duration_ns,
+                    static_cast<double>(ev.duration_ns) / 1000.0);
+            } else {
+                std::snprintf(
+                    buf,
+                    sizeof(buf),
+                    "rt_late tick=%" PRIu64 " late_ns=%" PRId64 " late_us=%.3f now_ns=%" PRId64 " sched_ns=%" PRId64,
+                    ev.tick,
+                    ev.late_ns,
+                    static_cast<double>(ev.late_ns) / 1000.0,
+                    ev.now_ns,
+                    ev.sched_ns);
+            }
 
-        char buf[256];
-        if (ev.fired_on_duration) {
-            std::snprintf(
-                buf,
-                sizeof(buf),
-                "rt_duration_exceeded tick=%" PRIu64 " duration_ns=%" PRId64 " duration_us=%.3f",
-                ev.tick,
-                ev.duration_ns,
-                static_cast<double>(ev.duration_ns) / 1000.0);
-        } else {
-            std::snprintf(
-                buf,
-                sizeof(buf),
-                "rt_late tick=%" PRIu64 " late_ns=%" PRId64 " late_us=%.3f now_ns=%" PRId64 " sched_ns=%" PRId64,
-                ev.tick,
-                ev.late_ns,
-                static_cast<double>(ev.late_ns) / 1000.0,
-                ev.now_ns,
-                ev.sched_ns);
-        }
-
-        controller.capture(buf);
+            controller.capture(buf);
         });
     });
 }

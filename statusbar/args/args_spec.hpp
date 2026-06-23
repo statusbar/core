@@ -335,13 +335,12 @@ class ArgumentSpecs
         requires requires { ArgTypeTraits<T>::arg_type; }
     auto add(std::string_view name, std::string_view description, T default_value) -> void
     {
-        specs_.push_back(
-            ArgumentSpec{
-                .name = std::string{name},
-                .type = ArgTypeTraits<T>::arg_type,
-                .description = std::string{description},
-                .default_value = default_to_string(default_value),
-            });
+        specs_.push_back(ArgumentSpec{
+            .name = std::string{name},
+            .type = ArgTypeTraits<T>::arg_type,
+            .description = std::string{description},
+            .default_value = default_to_string(default_value),
+        });
     }
 
     /// Add a typed argument with binding lambda
@@ -356,13 +355,12 @@ class ArgumentSpecs
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward,performance-unnecessary-value-param) - std::forward used in lambda capture, default_value copied into lambda
     void add(std::string_view name, std::string_view description, T default_value, Func&& setter)
     {
-        specs_.push_back(
-            ArgumentSpec{
-                .name = std::string{name},
-                .type = ArgTypeTraits<T>::arg_type,
-                .description = std::string{description},
-                .default_value = default_to_string(default_value),
-            });
+        specs_.push_back(ArgumentSpec{
+            .name = std::string{name},
+            .type = ArgTypeTraits<T>::arg_type,
+            .description = std::string{description},
+            .default_value = default_to_string(default_value),
+        });
 
         // Create binding that retrieves value as type T and calls setter
         auto& spec = specs_.back();
@@ -386,14 +384,13 @@ class ArgumentSpecs
         // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward) - std::forward used in lambda capture
         Func&& setter)
     {
-        specs_.push_back(
-            ArgumentSpec{
-                .name = std::string{name},
-                .type = ArgType::Choice,
-                .description = std::string{description},
-                .default_value = std::string{default_value},
-                .choices = std::move(choices),
-            });
+        specs_.push_back(ArgumentSpec{
+            .name = std::string{name},
+            .type = ArgType::Choice,
+            .description = std::string{description},
+            .default_value = std::string{default_value},
+            .choices = std::move(choices),
+        });
 
         auto& spec = specs_.back();
         spec.apply_binding = [setter = std::forward<Func>(setter), name_str = std::string{name}, def = std::string{default_value}](
@@ -444,12 +441,11 @@ class ArgumentSpecs
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward) - std::forward used in lambda capture
     void add_flag(std::string_view name, std::string_view description, Func&& setter)
     {
-        specs_.push_back(
-            ArgumentSpec{
-                .name = std::string{name},
-                .type = ArgType::Flag,
-                .description = std::string{description},
-            });
+        specs_.push_back(ArgumentSpec{
+            .name = std::string{name},
+            .type = ArgType::Flag,
+            .description = std::string{description},
+        });
 
         auto& spec = specs_.back();
         spec.apply_binding = [setter = std::forward<Func>(setter), name_str = std::string{name}](toml::Table const& root) -> void {
@@ -472,13 +468,12 @@ class ArgumentSpecs
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward) - std::forward used in lambda capture
     void add_file(std::string_view name, std::string_view description, std::string_view default_value, Func&& setter)
     {
-        specs_.push_back(
-            ArgumentSpec{
-                .name = std::string{name},
-                .type = ArgType::File,
-                .description = std::string{description},
-                .default_value = std::string{default_value},
-            });
+        specs_.push_back(ArgumentSpec{
+            .name = std::string{name},
+            .type = ArgType::File,
+            .description = std::string{description},
+            .default_value = std::string{default_value},
+        });
 
         auto& spec = specs_.back();
         spec.apply_binding = [setter = std::forward<Func>(setter), name_str = std::string{name}, def = std::string{default_value}](
@@ -506,13 +501,12 @@ class ArgumentSpecs
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward) - std::forward used in lambda capture
     void add_device(std::string_view name, std::string_view description, std::string_view default_value, Func&& setter)
     {
-        specs_.push_back(
-            ArgumentSpec{
-                .name = std::string{name},
-                .type = ArgType::Device,
-                .description = std::string{description},
-                .default_value = std::string{default_value},
-            });
+        specs_.push_back(ArgumentSpec{
+            .name = std::string{name},
+            .type = ArgType::Device,
+            .description = std::string{description},
+            .default_value = std::string{default_value},
+        });
 
         auto& spec = specs_.back();
         spec.apply_binding = [setter = std::forward<Func>(setter), name_str = std::string{name}, def = std::string{default_value}](
@@ -539,12 +533,11 @@ class ArgumentSpecs
         requires requires { ArgTypeTraits<T>::arg_type; }
     auto add_list(std::string_view name, std::string_view description) -> void
     {
-        specs_.push_back(
-            ArgumentSpec{
-                .name = std::string{name},
-                .type = ArgTypeTraits<T>::arg_type,
-                .description = std::string{description},
-            });
+        specs_.push_back(ArgumentSpec{
+            .name = std::string{name},
+            .type = ArgTypeTraits<T>::arg_type,
+            .description = std::string{description},
+        });
         specs_.back().is_list = true;
     }
 
@@ -561,12 +554,11 @@ class ArgumentSpecs
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward) - std::forward used in lambda capture
     void add_list(std::string_view name, std::string_view description, Func&& setter)
     {
-        specs_.push_back(
-            ArgumentSpec{
-                .name = std::string{name},
-                .type = ArgTypeTraits<T>::arg_type,
-                .description = std::string{description},
-            });
+        specs_.push_back(ArgumentSpec{
+            .name = std::string{name},
+            .type = ArgTypeTraits<T>::arg_type,
+            .description = std::string{description},
+        });
 
         auto& spec = specs_.back();
         spec.is_list = true;

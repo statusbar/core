@@ -244,12 +244,11 @@ void BpfPortContext::close() noexcept
     ::clock_gettime(rx_clock_id_, &ts);
     int64_t const timestamp_ns = (static_cast<int64_t>(ts.tv_sec) * 1'000'000'000LL) + ts.tv_nsec;
 
-    return success(
-        std::optional<EthernetRxSlot>{EthernetRxSlot{
-            .handle = handle,
-            .buffer = make_const_span(buf).first(static_cast<size_t>(n)),
-            .timestamp_ns = timestamp_ns,
-        }});
+    return success(std::optional<EthernetRxSlot>{EthernetRxSlot{
+        .handle = handle,
+        .buffer = make_const_span(buf).first(static_cast<size_t>(n)),
+        .timestamp_ns = timestamp_ns,
+    }});
 }
 
 [[nodiscard]] auto BpfPortContext::join_multicast(ieee::Eui48 const& addr) -> Status
@@ -523,12 +522,11 @@ void BpfPortContext::close() noexcept
         int64_t const timestamp_ns = (static_cast<int64_t>(bh->bh_tstamp.tv_sec) * 1'000'000'000LL) +
             (static_cast<int64_t>(bh->bh_tstamp.tv_usec) * 1'000LL);
 
-        return success(
-            std::optional<EthernetRxSlot>{EthernetRxSlot{
-                .handle = handle,
-                .buffer = make_const_span(buf).first(copy_len),
-                .timestamp_ns = timestamp_ns,
-            }});
+        return success(std::optional<EthernetRxSlot>{EthernetRxSlot{
+            .handle = handle,
+            .buffer = make_const_span(buf).first(copy_len),
+            .timestamp_ns = timestamp_ns,
+        }});
     }
 
     // Need to read more data from BPF

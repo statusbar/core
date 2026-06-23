@@ -41,10 +41,9 @@ TEST(config_store, write_control_characters)
 TEST(config_store, load_string)
 {
     Config config;
-    auto status = config.load_string(
-        "[server]\n"
-        "host = \"localhost\"\n"
-        "port = 8080\n");
+    auto status = config.load_string("[server]\n"
+                                     "host = \"localhost\"\n"
+                                     "port = 8080\n");
     EXPECT_TRUE(status);
 
     EXPECT_EQ(config.get_string("server.host", ""), "localhost");

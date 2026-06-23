@@ -268,11 +268,10 @@ auto MmapContext::tx_start(int64_t launch_time_ns) -> StatusValue<EthernetTxSlot
     }
 
     // Return slot with buffer pointing to payload area
-    return success(
-        EthernetTxSlot{
-            .handle = static_cast<uint64_t>(slot_index),
-            .buffer = std::span<uint8_t>(tx_payload(hdr), MMAP_MAX_FRAME_LENGTH),
-        });
+    return success(EthernetTxSlot{
+        .handle = static_cast<uint64_t>(slot_index),
+        .buffer = std::span<uint8_t>(tx_payload(hdr), MMAP_MAX_FRAME_LENGTH),
+    });
 }
 
 auto MmapContext::tx_commit(uint64_t handle, size_t frame_length) -> Status
@@ -375,12 +374,11 @@ auto MmapContext::rx_start() -> StatusValue<std::optional<EthernetRxSlot>>
         timestamp_ns = (static_cast<int64_t>(ts.tv_sec) * 1'000'000'000) + ts.tv_nsec;
     }
 
-    return success(
-        std::optional<EthernetRxSlot>{EthernetRxSlot{
-            .handle = static_cast<uint64_t>(rx_index_),
-            .buffer = std::span<uint8_t const>(rx_payload(hdr), hdr->tp_len),
-            .timestamp_ns = timestamp_ns,
-        }});
+    return success(std::optional<EthernetRxSlot>{EthernetRxSlot{
+        .handle = static_cast<uint64_t>(rx_index_),
+        .buffer = std::span<uint8_t const>(rx_payload(hdr), hdr->tp_len),
+        .timestamp_ns = timestamp_ns,
+    }});
 }
 
 auto MmapContext::rx_release(uint64_t handle) -> Status

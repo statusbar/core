@@ -109,9 +109,8 @@ inline void print_ne_fail(char const* ea, char const* eb, A const&, B const&, ch
 
 #define TEST(groupname, testname)                                                                                                  \
     static void test_##groupname##_##testname##_runner();                                                                          \
-    static ::statusbar::test::TestRegister const groupname##_##testname##_(                                                        \
-        ::statusbar::test::TestInfo{                                                                                               \
-            .section = __FILE_NAME__, .group = #groupname, .name = #testname, .func = test_##groupname##_##testname##_runner});    \
+    static ::statusbar::test::TestRegister const groupname##_##testname##_(::statusbar::test::TestInfo{                            \
+        .section = __FILE_NAME__, .group = #groupname, .name = #testname, .func = test_##groupname##_##testname##_runner});        \
     static void test_##groupname##_##testname##_runner()
 
 // The failure action used by every EXPECT_* macro. With exceptions it throws

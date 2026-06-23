@@ -25,23 +25,21 @@ namespace statusbar::args {
 
 void ArgumentSpecs::add_flag(std::string_view name, std::string_view description)
 {
-    specs_.push_back(
-        ArgumentSpec{
-            .name = std::string{name},
-            .type = ArgType::Flag,
-            .description = std::string{description},
-        });
+    specs_.push_back(ArgumentSpec{
+        .name = std::string{name},
+        .type = ArgType::Flag,
+        .description = std::string{description},
+    });
 }
 
 void ArgumentSpecs::add_file(std::string_view name, std::string_view description, std::string_view default_value)
 {
-    specs_.push_back(
-        ArgumentSpec{
-            .name = std::string{name},
-            .type = ArgType::File,
-            .description = std::string{description},
-            .default_value = std::string{default_value},
-        });
+    specs_.push_back(ArgumentSpec{
+        .name = std::string{name},
+        .type = ArgType::File,
+        .description = std::string{description},
+        .default_value = std::string{default_value},
+    });
 }
 
 void ArgumentSpecs::add_choice(
@@ -52,14 +50,13 @@ void ArgumentSpecs::add_choice(
     for (auto const* c : choices) {
         choice_vec.emplace_back(c);
     }
-    specs_.push_back(
-        ArgumentSpec{
-            .name = std::string{name},
-            .type = ArgType::Choice,
-            .description = std::string{description},
-            .default_value = std::string{default_value},
-            .choices = std::move(choice_vec),
-        });
+    specs_.push_back(ArgumentSpec{
+        .name = std::string{name},
+        .type = ArgType::Choice,
+        .description = std::string{description},
+        .default_value = std::string{default_value},
+        .choices = std::move(choice_vec),
+    });
 }
 
 auto ArgumentSpecs::apply(toml::Table const& root) const -> Status

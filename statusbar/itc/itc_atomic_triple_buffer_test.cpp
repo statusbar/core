@@ -86,13 +86,12 @@ TEST(itc_atb_typed, spsc_stress_no_torn_reads_and_monotonic)
     std::thread producer{[&]() noexcept {
         int64_t n = 0;
         while (!stop.load(std::memory_order_relaxed)) {
-            buf.publish(
-                Quad{
-                    .a = n,
-                    .b = ~n,
-                    .c = n + 1,
-                    .d = ~(n + 1),
-                });
+            buf.publish(Quad{
+                .a = n,
+                .b = ~n,
+                .c = n + 1,
+                .d = ~(n + 1),
+            });
             ++n;
         }
     }};

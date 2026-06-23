@@ -30,29 +30,28 @@ namespace {
 
 auto make_ethernet_bytes() -> std::array<uint8_t, 18>
 {
-    return std::array<uint8_t, 18>{
-        // dest MAC
-        0x01,
-        0x80,
-        0xC2,
-        0x00,
-        0x00,
-        0x0E,
-        // src MAC
-        0x00,
-        0x11,
-        0x22,
-        0x33,
-        0x44,
-        0x55,
-        // VLAN tag (tpid=0x8100, tci=0x0064)
-        0x81,
-        0x00,
-        0x00,
-        0x64,
-        // ethertype (0x88F7 = gPTP)
-        0x88,
-        0xF7};
+    return std::array<uint8_t, 18>{// dest MAC
+                                   0x01,
+                                   0x80,
+                                   0xC2,
+                                   0x00,
+                                   0x00,
+                                   0x0E,
+                                   // src MAC
+                                   0x00,
+                                   0x11,
+                                   0x22,
+                                   0x33,
+                                   0x44,
+                                   0x55,
+                                   // VLAN tag (tpid=0x8100, tci=0x0064)
+                                   0x81,
+                                   0x00,
+                                   0x00,
+                                   0x64,
+                                   // ethertype (0x88F7 = gPTP)
+                                   0x88,
+                                   0xF7};
 }
 
 void bench_ethernet_load()

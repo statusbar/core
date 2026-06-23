@@ -72,44 +72,40 @@ static auto build_rules(std::uint16_t avb_vlan) -> std::vector<CompiledRule<>>
 
     // 1. gPTP — typically untagged on the AVB interface (per
     //    802.1AS). EtherType 0x88F7.
-    append(
-        ClassifierRuleBuilder<>{}
-            .ethertype(ETHERTYPE_GPTP)
-            .vlan_untagged()
-            .result(my_app::rx::gptp | flag::rx_gptp | flag::process)
-            .priority(10)
-            .build());
+    append(ClassifierRuleBuilder<>{}
+               .ethertype(ETHERTYPE_GPTP)
+               .vlan_untagged()
+               .result(my_app::rx::gptp | flag::rx_gptp | flag::process)
+               .priority(10)
+               .build());
 
     // 2. AVTP CRF (media clock) in the AVB VLAN.
-    append(
-        ClassifierRuleBuilder<>{}
-            .ethertype(ETHERTYPE_AVTP)
-            .vlan_tagged_exact(avb_vlan)
-            .avtp_subtype(AVTP_SUBTYPE_CRF)
-            .result(my_app::rx::avtp_crf | flag::rx_avtp_stream | flag::process)
-            .priority(20)
-            .build());
+    append(ClassifierRuleBuilder<>{}
+               .ethertype(ETHERTYPE_AVTP)
+               .vlan_tagged_exact(avb_vlan)
+               .avtp_subtype(AVTP_SUBTYPE_CRF)
+               .result(my_app::rx::avtp_crf | flag::rx_avtp_stream | flag::process)
+               .priority(20)
+               .build());
 
     // 3. AVTP AM824 (IEC 61883-6 audio) in the AVB VLAN. AM824 rides
     //    inside the 61883/IIDC AVTP subtype.
-    append(
-        ClassifierRuleBuilder<>{}
-            .ethertype(ETHERTYPE_AVTP)
-            .vlan_tagged_exact(avb_vlan)
-            .avtp_subtype(AVTP_SUBTYPE_61883)
-            .result(my_app::rx::avtp_am824 | flag::rx_avtp_stream | flag::process)
-            .priority(20)
-            .build());
+    append(ClassifierRuleBuilder<>{}
+               .ethertype(ETHERTYPE_AVTP)
+               .vlan_tagged_exact(avb_vlan)
+               .avtp_subtype(AVTP_SUBTYPE_61883)
+               .result(my_app::rx::avtp_am824 | flag::rx_avtp_stream | flag::process)
+               .priority(20)
+               .build());
 
     // 4. AVTP AAF (raw PCM audio) in the AVB VLAN.
-    append(
-        ClassifierRuleBuilder<>{}
-            .ethertype(ETHERTYPE_AVTP)
-            .vlan_tagged_exact(avb_vlan)
-            .avtp_subtype(AVTP_SUBTYPE_AAF)
-            .result(my_app::rx::avtp_aaf | flag::rx_avtp_stream | flag::process)
-            .priority(20)
-            .build());
+    append(ClassifierRuleBuilder<>{}
+               .ethertype(ETHERTYPE_AVTP)
+               .vlan_tagged_exact(avb_vlan)
+               .avtp_subtype(AVTP_SUBTYPE_AAF)
+               .result(my_app::rx::avtp_aaf | flag::rx_avtp_stream | flag::process)
+               .priority(20)
+               .build());
 
     // 5. ATDECC (ADP + AECP + ACMP), untagged. All three share the
     //    AVTP EtherType but have different subtype bytes, and a TCAM
@@ -117,37 +113,34 @@ static auto build_rules(std::uint16_t avb_vlan) -> std::vector<CompiledRule<>>
     //    One conceptual rule therefore fans out to three compiled
     //    rules carrying the same result flags.
     for (auto subtype : {AVTP_SUBTYPE_ADP, AVTP_SUBTYPE_AECP, AVTP_SUBTYPE_ACMP}) {
-        append(
-            ClassifierRuleBuilder<>{}
-                .ethertype(ETHERTYPE_AVTP)
-                .vlan_untagged()
-                .avtp_subtype(subtype)
-                .result(my_app::rx::atdecc | flag::process)
-                .priority(30)
-                .build());
+        append(ClassifierRuleBuilder<>{}
+                   .ethertype(ETHERTYPE_AVTP)
+                   .vlan_untagged()
+                   .avtp_subtype(subtype)
+                   .result(my_app::rx::atdecc | flag::process)
+                   .priority(30)
+                   .build());
     }
 
     // 6. Any IPv4 UDP, untagged. The "protocol" byte at IPv4 header
     //    offset +9 tells us the L4 protocol; 17 == UDP.
-    append(
-        ClassifierRuleBuilder<>{}
-            .ethertype(ETHERTYPE_IPV4)
-            .vlan_untagged()
-            .ipv4_protocol(IP_PROTO_UDP)
-            .result(my_app::rx::ipv4_udp | flag::process)
-            .priority(40)
-            .build());
+    append(ClassifierRuleBuilder<>{}
+               .ethertype(ETHERTYPE_IPV4)
+               .vlan_untagged()
+               .ipv4_protocol(IP_PROTO_UDP)
+               .result(my_app::rx::ipv4_udp | flag::process)
+               .priority(40)
+               .build());
 
     // 7. Any IPv6 UDP, untagged. The "next header" byte at IPv6
     //    offset +6 serves the same role.
-    append(
-        ClassifierRuleBuilder<>{}
-            .ethertype(ETHERTYPE_IPV6)
-            .vlan_untagged()
-            .ipv6_next_header(IP_PROTO_UDP)
-            .result(my_app::rx::ipv6_udp | flag::process)
-            .priority(40)
-            .build());
+    append(ClassifierRuleBuilder<>{}
+               .ethertype(ETHERTYPE_IPV6)
+               .vlan_untagged()
+               .ipv6_next_header(IP_PROTO_UDP)
+               .result(my_app::rx::ipv6_udp | flag::process)
+               .priority(40)
+               .build());
 
     return rules;
 }

@@ -246,8 +246,8 @@ TEST(statusbar_status, catch_or_status_forwards_failure_unchanged)
 #if __cpp_exceptions
 TEST(statusbar_status, catch_or_status_maps_exception_to_ec)
 {
-    StatusValue<int> r = catch_or_status(
-        []() -> StatusValue<int> { throw std::runtime_error("boom"); }, std::errc::invalid_argument);
+    StatusValue<int> r =
+        catch_or_status([]() -> StatusValue<int> { throw std::runtime_error("boom"); }, std::errc::invalid_argument);
     EXPECT_FALSE(r);
     EXPECT_EQ(r.error(), std::errc::invalid_argument);
 }
@@ -256,8 +256,8 @@ TEST(statusbar_status, catch_or_status_preserves_system_error_code)
 {
     // A std::system_error keeps its code() — round-trips throw_or_abort(ec).
     auto const original = std::make_error_code(std::errc::no_such_file_or_directory);
-    StatusValue<int> r = catch_or_status(
-        [original]() -> StatusValue<int> { throw std::system_error(original); }, std::errc::io_error);
+    StatusValue<int> r =
+        catch_or_status([original]() -> StatusValue<int> { throw std::system_error(original); }, std::errc::io_error);
     EXPECT_FALSE(r);
     EXPECT_EQ(r.error(), original);
 }

@@ -169,9 +169,8 @@ consteval std::size_t field_bound(Spec sp, ArgInfo a)
         }
         return sp.width > 1 ? sp.width : 1;
     }
-    fail(
-        "statusbar::fmt: unsupported argument type (use an integer, string "
-        "literal, fixed_str, or char; not float/bool/pointer/string_view)");
+    fail("statusbar::fmt: unsupported argument type (use an integer, string "
+         "literal, fixed_str, or char; not float/bool/pointer/string_view)");
 }
 
 /// consteval: validate Fmt against Args and return the exact worst-case length.

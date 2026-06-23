@@ -180,4 +180,31 @@ inline void set_ifr_data(ifreq& ifr, T* data) noexcept
 
 #endif  // __linux__
 
+/// Read an interface's operational link (carrier) state via SIOCGIFFLAGS,
+/// reporting the IFF_RUNNING flag (driver has detected link / resources allocated)
+/// — distinct from IFF_UP (administrative state). Works on both Linux and the BSDs/
+/// macOS. Returns true=link up, false=link down, or nullopt if the flags could not
+/// be read (no such interface, no socket); callers treat nullopt as "unknown" and
+/// leave their last-known state unchanged. Allocates a transient AF_INET datagram
+/// socket purely as the ioctl carrier and closes it before returning.
+[[nodiscard]] inline auto read_interface_carrier(std::string_view iface) noexcept -> std::optional<bool>
+{
+    int const sock = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        return std::nullopt;
+    }
+    ifreq ifr{};
+    auto const name = ifname_bytes(ifr);
+    auto const n = std::min(iface.size(), name.size() - 1);
+    for (size_t i = 0; i < n; ++i) {
+        name[i] = static_cast<uint8_t>(iface[i]);
+    }
+    int const rc = ::ioctl(sock, SIOCGIFFLAGS, &ifr);
+    ::close(sock);
+    if (rc < 0) {
+        return std::nullopt;
+    }
+    return (static_cast<unsigned>(ifr.ifr_flags) & IFF_RUNNING) != 0U;
+}
+
 }  // namespace statusbar::net

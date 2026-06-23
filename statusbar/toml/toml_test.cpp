@@ -397,13 +397,12 @@ TEST(toml_parser, nested_table_headers)
 
 TEST(toml_parser, multiple_tables)
 {
-    auto result = parse(
-        "[server]\n"
-        "host = \"localhost\"\n"
-        "port = 8080\n"
-        "\n"
-        "[database]\n"
-        "name = \"mydb\"\n");
+    auto result = parse("[server]\n"
+                        "host = \"localhost\"\n"
+                        "port = 8080\n"
+                        "\n"
+                        "[database]\n"
+                        "name = \"mydb\"\n");
     EXPECT_TRUE(result.has_value());
 
     EXPECT_EQ(*result->get_path("server.host")->as_string(), "localhost");
@@ -435,12 +434,11 @@ TEST(toml_parser, dotted_keys)
 
 TEST(toml_parser, array_of_tables)
 {
-    auto result = parse(
-        "[[items]]\n"
-        "name = \"first\"\n"
-        "\n"
-        "[[items]]\n"
-        "name = \"second\"\n");
+    auto result = parse("[[items]]\n"
+                        "name = \"first\"\n"
+                        "\n"
+                        "[[items]]\n"
+                        "name = \"second\"\n");
     EXPECT_TRUE(result.has_value());
 
     auto* arr = result->get("items")->as_array();
@@ -457,9 +455,8 @@ TEST(toml_parser, array_of_tables)
 
 TEST(toml_parser, line_comments)
 {
-    auto result = parse(
-        "# This is a comment\n"
-        "key = \"value\" # inline comment\n");
+    auto result = parse("# This is a comment\n"
+                        "key = \"value\" # inline comment\n");
     EXPECT_TRUE(result.has_value());
     EXPECT_EQ(*result->get("key")->as_string(), "value");
 }
@@ -760,11 +757,10 @@ TEST(toml_parse_edge, inline_table)
 
 TEST(toml_parse_edge, array_of_tables)
 {
-    auto result = parse(
-        "[[items]]\n"
-        "name = \"first\"\n"
-        "[[items]]\n"
-        "name = \"second\"\n");
+    auto result = parse("[[items]]\n"
+                        "name = \"first\"\n"
+                        "[[items]]\n"
+                        "name = \"second\"\n");
     EXPECT_TRUE(result.has_value());
     auto items = result->get("items")->as_array();
     EXPECT_TRUE(items != nullptr);

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.31)
 project(
   statusbar-core
-  VERSION 1.2.0
+  VERSION 1.3.0
   LANGUAGES CXX)
 
 include(GNUInstallDirs)
@@ -172,7 +172,7 @@ if(NOT STATUSBAR_AGGREGATE_BUILD)
   # -dev's cmake config exports IMPORTED targets pointing at runtime binaries
   # (statusbar-net-tcp-echo-example etc.), so installing -dev without the
   # runtime breaks find_package() on the consumer side. >= (not =) so an
-  # auto-incremented Debian revision (1.2.0-<rev>, see the container-build
+  # auto-incremented Debian revision (1.3.0-<rev>, see the container-build
   # scripts) still satisfies the runtime dependency.
   set(CPACK_DEBIAN_DEVEL_PACKAGE_DEPENDS
       "statusbar-core (>= ${PROJECT_VERSION})")

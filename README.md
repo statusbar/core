@@ -2,7 +2,7 @@
 
 Foundational C++23 utilities — error handling, zero-copy buffers, IEEE and networking primitives, state machines, inter-thread communication, real-time scheduling, and terminal UI.
 
-Version 1.2.0.
+Version 1.3.0.
 
 > Portions of this repository were developed with assistance from Claude,
 > an AI model by Anthropic. All reference material used in this process

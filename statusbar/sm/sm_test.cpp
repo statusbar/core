@@ -6,6 +6,7 @@
 
 #include "statusbar/sm/sm.hpp"
 
+#include "statusbar/sm/sm_test_support.hpp"
 #include "statusbar/sm/sm_tool.hpp"
 #include "statusbar/test/test.hpp"
 
@@ -219,32 +220,10 @@ using Machine = StateMachine<Def, table>;
 }  // namespace self_action
 
 //
-// Recording Observer for Testing
+// Recording Observer for Testing (shared utility)
 //
 
-template <typename Def>
-struct RecordingObserver
-{
-    using State = typename Def::State;
-    using Event = typename Def::Event;
-
-    struct Transition
-    {
-        State old_state;
-        Event event;
-        std::string_view action_name;
-        State new_state;
-    };
-
-    std::vector<Transition>* transitions{nullptr};
-
-    void operator()(State old_state, Event event, std::string_view action_name, State new_state) const
-    {
-        if (transitions) {
-            transitions->push_back({old_state, event, action_name, new_state});
-        }
-    }
-};
+using statusbar::sm::test::RecordingObserver;
 
 //
 // Static Assert Tests for Compile-time Verification

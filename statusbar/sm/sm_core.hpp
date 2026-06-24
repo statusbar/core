@@ -205,8 +205,10 @@ class StateMachine
             transition.action(ctx, event_time);
         }
         state_ = transition.next_state;
-        // Notify observer of transition (only when state actually changed)
-        if (old_state != state_) {
+        // Notify observer when the transition did something: either the state
+        // changed, or an action ran (self-transitions with an action still
+        // notify). Pure no-op self-loops (same state, no action) stay silent.
+        if (old_state != state_ || transition.action != nullptr) {
             observer_(old_state, event, transition.action_name, state_);
         }
     }

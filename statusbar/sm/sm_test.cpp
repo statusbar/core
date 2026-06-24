@@ -171,6 +171,54 @@ using Machine = StateMachine<Def, table>;
 }  // namespace without_uct
 
 //
+// Test State Machine with an action-bearing SELF-transition
+//
+
+namespace self_action {
+
+struct Context
+{
+    int ticks{0};
+};
+
+struct Def
+{
+    using Context = self_action::Context;
+    enum class State : uint8_t
+    {
+        Running = 0,
+        Count
+    };
+    enum class Event : uint8_t
+    {
+        Tick = 0,
+        Count
+    };
+};
+
+inline void on_tick(Def::Context& ctx, TimePoint /*event_time*/)
+{
+    ctx.ticks++;
+}
+
+inline constexpr auto table = [] {
+    using State = Def::State;
+    using Event = Def::Event;
+    using T = Transitions<Def>;
+
+    TransitionTable<Def> t{};
+
+    // Self-transition WITH an action: Running --Tick--> Running, runs on_tick.
+    t.at(State::Running, Event::Tick) = T::action<on_tick>(State::Running);
+
+    return t;
+}();
+
+using Machine = StateMachine<Def, table>;
+
+}  // namespace self_action
+
+//
 // Recording Observer for Testing
 //
 
@@ -600,10 +648,10 @@ TEST(sm_core, observer_no_notification_on_ignored_event)
     EXPECT_EQ(transitions.size(), count_after_go);
 }
 
-TEST(sm_core, self_transition_no_observer_notification)
+TEST(sm_core, noop_self_transition_no_observer_notification)
 {
-    // Test that a transition to the same state does NOT notify observer
-    // This is the current behavior - observer only notified when state changes
+    // A self-transition with NO action (same state, no side effect) does NOT
+    // notify the observer - there is nothing to report.
     using Obs = RecordingObserver<with_uct::Def>;
     std::vector<Obs::Transition> transitions;
     Obs obs{&transitions};
@@ -619,12 +667,34 @@ TEST(sm_core, self_transition_no_observer_notification)
     size_t count_after_uct = transitions.size();
     EXPECT_EQ(count_after_uct, 1);  // Just the UCT Start->Ready
 
-    // Reset in Ready is a self-transition
+    // Reset in Ready is a no-action self-transition
     machine.handle_event(ctx, with_uct::Def::Event::Reset);
 
-    // Observer should NOT be notified (state didn't change)
+    // Observer should NOT be notified (state didn't change and no action ran)
     EXPECT_EQ(transitions.size(), count_after_uct);
     EXPECT_EQ(machine.current_state(), with_uct::Def::State::Ready);
+}
+
+TEST(sm_core, action_self_transition_notifies_observer)
+{
+    // A self-transition WITH an action DOES notify the observer, even though
+    // old_state == new_state - the action ran, so there is something to report.
+    using Obs = RecordingObserver<self_action::Def>;
+    std::vector<Obs::Transition> transitions;
+    Obs obs{&transitions};
+
+    self_action::Context ctx;
+    StateMachine<self_action::Def, self_action::table, Obs> machine{obs};
+
+    machine.handle_event(ctx, self_action::Def::Event::Tick, TimePoint{});
+
+    EXPECT_EQ(transitions.size(), 1u);
+    if (transitions.size() == 1) {
+        EXPECT_EQ(transitions[0].old_state, self_action::Def::State::Running);
+        EXPECT_EQ(transitions[0].new_state, self_action::Def::State::Running);
+        EXPECT_EQ(transitions[0].action_name, "on_tick");
+    }
+    EXPECT_EQ(ctx.ticks, 1);
 }
 
 //

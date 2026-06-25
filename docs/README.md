@@ -23,8 +23,8 @@ two-minute orientation, then dive into its headers under
 | net          | Non-blocking async TCP, UDP, and raw Ethernet on a poll()-driven reactor.           | [NET_MODULE.md](NET_MODULE.md)             |
 | pcap         | Read/write support for Wireshark pcap/pcapng files plus synthetic-time replay.      | [PCAP_MODULE.md](PCAP_MODULE.md)           |
 | realtime     | Hard-realtime utilities: memlock, SCHED_FIFO, affinity, deadline timers, tripwires. | [REALTIME_MODULE.md](REALTIME_MODULE.md)   |
-| safe_arith   | Overflow-detecting integer arithmetic helpers wrapping the compiler builtins.       | (no overview yet)                          |
-| secure_random| Cryptographic-quality random byte generation (getrandom / arc4random_buf).          | (no overview yet)                          |
+| safe_arith   | Overflow-detecting integer arithmetic helpers wrapping the compiler builtins.       | [SAFE_ARITH_MODULE.md](SAFE_ARITH_MODULE.md)         |
+| secure_random| Cryptographic-quality random byte generation (getrandom / arc4random_buf).          | [SECURE_RANDOM_MODULE.md](SECURE_RANDOM_MODULE.md)   |
 | sm           | C++23 compile-time finite state machine framework with zero-overhead transitions.   | [SM_MODULE.md](SM_MODULE.md)               |
 | stats        | Descriptive statistics, histograms, and lock-free atomic accumulators.              | [STATS_MODULE.md](STATS_MODULE.md)         |
 | status       | Foundational error-handling primitive over `std::expected<T, std::error_code>`.     | [STATUS_MODULE.md](STATUS_MODULE.md)       |
@@ -39,6 +39,7 @@ In-depth references that go beyond the per-module overviews:
 
 - [DESERIALIZER_GUIDE.md](DESERIALIZER_GUIDE.md) — comprehensive guide to the buffer module's compiled-deserializer API.
 - [ERROR_HANDLING_EXAMPLES.md](ERROR_HANDLING_EXAMPLES.md) — patterns for using `Status` and `std::expected` across the codebase.
+- [XDP_TCAM.md](XDP_TCAM.md) — design and migration plan for the net module's XDP packet classifier: moving the kernel-side filter to a TCAM interpreter that shares the userspace `CompiledRule` representation.
 
 ## Build system
 

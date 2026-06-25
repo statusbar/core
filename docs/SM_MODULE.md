@@ -18,10 +18,11 @@ compile-time-reflected name. `StateMachine<Def, table>` instances carry
 only the current state byte plus an optional observer.
 
 `handle_event()` looks up the `(state, event)` slot, calls the action,
-advances the state, and notifies the observer when the state actually
-changed. If `Event::UCT` is present the machine also auto-fires that
-event in a chain before and after each external event — a state can
-declare "as soon as you arrive, immediately move on with this action."
+advances the state, and notifies the observer when the transition does
+something — the state changed or an action ran. If `Event::UCT` is
+present the machine also auto-fires that event in a chain before and
+after each external event — a state can declare "as soon as you arrive,
+immediately move on with this action."
 
 Because the table and enum names are compile-time data,
 `generate_dot()` and `generate_markdown_table()` render documentation as
@@ -94,6 +95,7 @@ int main() {
 - `statusbar/sm/sm_markdown.hpp` — `generate_markdown_table()`.
 - `statusbar/sm/sm_registry.hpp` — `OutputFormat`, `StateMachineInfo`, `make_sm_info()`.
 - `statusbar/sm/sm_tool.hpp` — `SmToolConfig` and `sm_tool()`.
+- `statusbar/sm/sm_test_support.hpp` — test-only helpers (namespace `statusbar::sm::test`): `RecordingObserver` (full transition log), `ActionRecorder` (most recent action name), and the `Observed<Def, Table>` machine+recorder fixture.
 
 ## Dependencies
 
@@ -109,8 +111,10 @@ int main() {
   state stops changing — don't build UCT cycles.
 - Slots default to `valid == false`; an unmatched event is silently
   ignored — no "unhandled event" callback.
-- Observers fire only when `old_state != new_state`; a self-transition
-  runs its action but is invisible to the observer.
+- Observers fire when a transition does something: the state changed or
+  an action ran. A self-transition that runs an action still notifies
+  (the observer sees `old_state == new_state`); only a no-op self-loop
+  (same state, no action) is invisible to the observer.
 - Actions have signature `void(Context&, TimePoint)`. The name shown in
   DOT/Markdown comes from `function_name<Fn>`, which parses
   `std::source_location::current().function_name()` for both Clang and

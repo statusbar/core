@@ -88,6 +88,8 @@ int main() {
 - `statusbar/net/net_test_port.hpp`, `net_loopback_port.hpp`, `net_bpf_port.hpp`, `net_tap_bridge.hpp` — `EthernetPort` backends.
 - `statusbar/net/net_linux_mmap.hpp`, `net_linux_xdp.hpp` — Linux `PACKET_MMAP` and AF_XDP contexts (Linux-only). `XdpConfig` chooses the bind mode (`auto_` / `zero_copy` / `copy`) and attach mode (`native` / `generic`, native first with a fall back to generic unless zero-copy was demanded), retries a bind refused with EBUSY while the previous socket's queue is still being released, and with a `pin_path` pins the program and its maps under `/sys/fs/bpf/statusbar/<interface>` so a restart adopts the running program instead of re-attaching (`XdpProgram::pin_path_for`, `query`, `owner`, `detach`). `socket_stats()` counts the user-space side of the rings; `kernel_stats()` reads the kernel's `XDP_STATISTICS`. `set_napi_busy_poll(true)` tells a zero-copy context that its queue's NAPI thread busy polls: once a kick has scheduled the thread, `tx_flush()` skips the kick and leaves the pending flag set, so a kick is still owed if busy poll stops. A busy-polled queue with frames pending and no progress since the last flush is kicked anyway, counted in `tx_flush_stalled`.
 - `statusbar/net/net_xdp_avtp_rules.hpp` — the TCAM rules that steer an AVTP stream ID into AF_XDP, tagged and untagged, and `avtp_payload_offset`.
+- `statusbar/net/net_netlink.hpp` — the netlink framing (`netlink::put_header`, `put_attribute`, `walk_messages`, `walk_attributes`, `find_attribute`, `ack_status`, `end_status`) and, on Linux, `netlink::Socket`, the blocking request/reply socket the netlink clients share.
+- `statusbar/net/net_netdev_features.hpp` — the netdev generic-netlink family: `netdev::NetdevClient`, `DeviceFeatures` / `XskFeatures`, `query_xsk_features`, `launch_time_supported` (Linux); the framing and parsers build everywhere.
 - `statusbar/net/net_rss.hpp` — ethtool RSS indirection: read a NIC's table, steer every bucket to one queue (`RssSteering` puts the table back when it goes out of scope), with a recorder double for tests.
 
 ## Dependencies
@@ -109,6 +111,10 @@ int main() {
 - `SocketAddress::from_string` takes host *and* port plus a socket type (`SocketStream` / `SocketDatagram`) — the type drives `getaddrinfo` hints.
 - `NetError::would_block` is the expected end-of-drain on nonblocking `recv` / `send` — treat as success, not failure.
 - **Two clocks, told.** The reactor's `now_ns` is control-plane time (`steady_clock`); an `EthernetRxSlot::timestamp_ns` is on `CLOCK_MONOTONIC_RAW`. Neither is read by the code that handles a frame: the reactor tells its ports, a drain tells its port. See [TIME_POLICY.md](TIME_POLICY.md).
+
+### The netdev family
+
+`netdev::launch_time_supported(ifindex)` asks the kernel's netdev generic-netlink family (Linux 6.3; `Documentation/netlink/specs/netdev.yaml`) whether the device's driver acts on an AF_XDP launch time: `NETDEV_CMD_DEV_GET`'s `xsk-features`, bit `NETDEV_XSK_FLAGS_TX_LAUNCH_TIME_FIFO` (6.15; igc and stmmac set it). A kernel without the family answers ENOENT, one without the attribute answers no features, and both send untimed frames anyway. Ask once per device and hand the answer to every user of its queues; `XdpContext::open()` asks the same question for its own `XdpConfig::tx_launch_time`. The queue still needs an offloaded ETF qdisc (`net_tc_launch_time.hpp`) for the NIC to hold a frame until its launch time. `NetdevClient` keeps the socket open across several `features()` queries; `netlink::Socket` beneath it is what any other request/reply netlink client in this module builds on: one request under its own sequence number, every reply addressed to it handed over, the acknowledgement (or a dump's `NLMSG_DONE`) its result, a one-second timeout so a dropped request does not hang its caller.
 
 ## Further reading
 

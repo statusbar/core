@@ -13,6 +13,7 @@ statusbar_add_module(
   net_linux_mmap.cpp
   net_linux_xdp.cpp
   net_message_reactor.cpp
+  net_netdev_features.cpp
   net_netlink.cpp
   net_rawnet.cpp
   net_rawnet_port.cpp
@@ -49,6 +50,7 @@ statusbar_add_module(
   net_linux_mmap_test.cpp
   net_interface_info_test.cpp
   net_launch_order_test.cpp
+  net_netdev_features_test.cpp
   net_netlink_test.cpp
   net_tc_launch_time_test.cpp
   net_tc_qdisc_test.cpp
@@ -67,6 +69,7 @@ statusbar_add_module(
 # parsers are Linux only; the netlink framing builds everywhere, but fuzzing
 # runs where the kernel it frames for is.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_core_fuzzer(${CMAKE_CURRENT_LIST_DIR}/net_netdev_features_fuzzer.cpp)
   add_core_fuzzer(${CMAKE_CURRENT_LIST_DIR}/net_netlink_fuzzer.cpp)
   add_core_fuzzer(${CMAKE_CURRENT_LIST_DIR}/net_tc_qdisc_fuzzer.cpp)
   add_core_fuzzer(${CMAKE_CURRENT_LIST_DIR}/net_vlan_link_fuzzer.cpp)

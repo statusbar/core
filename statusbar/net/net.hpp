@@ -18,6 +18,7 @@
 #include "statusbar/net/net_ethernet_port.hpp"
 #include "statusbar/net/net_loopback_port.hpp"
 #include "statusbar/net/net_message_reactor.hpp"
+#include "statusbar/net/net_netdev_features.hpp"
 #include "statusbar/net/net_netlink.hpp"
 #include "statusbar/net/net_notify.hpp"
 #include "statusbar/net/net_posix_util.hpp"

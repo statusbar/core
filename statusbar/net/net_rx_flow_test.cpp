@@ -23,7 +23,12 @@
 #include <cstdint>
 #include <optional>
 #include <system_error>
+#include <utility>
 #include <vector>
+
+#if defined(__linux__)
+#    include <arpa/inet.h>
+#endif
 
 using namespace statusbar;
 using namespace statusbar::net;
@@ -244,6 +249,319 @@ TEST(net_rx_flow, an_unknown_interface_is_told_apart_from_no_classifier)
     if (!rule) {
         EXPECT_FALSE(rule.error() == std::errc::operation_not_supported);
     }
+}
+
+// The steering guard, driven through the recorders
+
+namespace {
+
+/// A four-queue NIC with an eight-bucket RSS table spread over every queue.
+struct Bench
+{
+    RxFlowRecorder nic;
+    RssRecorder rss;
+
+    Bench()
+    {
+        nic.set_rx_queues(4);
+        rss.set_table({0, 1, 2, 3, 0, 1, 2, 3});
+    }
+};
+
+/// Two rules in slots 8 and 9 steering AVTP and priority 3 to queue 3, which
+/// the RSS table then leaves out.
+[[nodiscard]] auto avb_plan() -> RxFlowPlan
+{
+    return RxFlowPlan{
+        .locations = {.first = 8, .count = 4},
+        .rules = {ethertype_rule(8, 3, AVTP_ETHERTYPE), pcp_rule(9, 3, 3)},
+        .rss_excluded = {3}};
+}
+
+RssIndirection const SPREAD_WITHOUT_THREE{0, 1, 2, 0, 1, 2, 0, 1};
+RssIndirection const SPREAD_OVER_ALL{0, 1, 2, 3, 0, 1, 2, 3};
+
+}  // namespace
+
+TEST(net_rx_flow_steering, steering_installs_the_rules_the_filters_and_the_spread)
+{
+    Bench bench;
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_TRUE(guard.has_value());
+    EXPECT_TRUE(guard->holds());
+    EXPECT_TRUE(guard->wrote_rss());
+    EXPECT_TRUE(guard->enabled_ntuple());
+    EXPECT_EQ(guard->leftovers(), 0U);
+    EXPECT_EQ(guard->plan().rules.size(), 2U);
+    EXPECT_EQ(bench.nic.rules().size(), 2U);
+    EXPECT_TRUE(bench.nic.ntuple_flag());
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::ntuple_write), 1U);
+    EXPECT_TRUE(bench.rss.table() == SPREAD_WITHOUT_THREE);
+    EXPECT_EQ(bench.rss.writes().size(), 1U);
+    guard->release();
+}
+
+TEST(net_rx_flow_steering, a_restore_leaves_the_nic_as_it_was_but_for_the_filters)
+{
+    Bench bench;
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_TRUE(guard.has_value());
+
+    auto const restored = guard->restore();
+    EXPECT_TRUE(restored.has_value());
+    EXPECT_FALSE(guard->holds());
+    EXPECT_TRUE(bench.nic.rules().empty());
+    EXPECT_TRUE(bench.rss.table() == SPREAD_OVER_ALL);
+    EXPECT_EQ(bench.rss.writes().size(), 2U);
+    EXPECT_TRUE(bench.nic.ntuple_flag());  // never turned off: igb and igc reset the adapter for it
+
+    // Nothing owed any more: a second restore is a no-op.
+    EXPECT_TRUE(guard->restore().has_value());
+    EXPECT_EQ(bench.rss.writes().size(), 2U);
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::remove), 2U);
+}
+
+TEST(net_rx_flow_steering, the_destructor_restores)
+{
+    Bench bench;
+    {
+        auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+        EXPECT_TRUE(guard.has_value());
+        EXPECT_EQ(bench.nic.rules().size(), 2U);
+    }
+    EXPECT_TRUE(bench.nic.rules().empty());
+    EXPECT_TRUE(bench.rss.table() == SPREAD_OVER_ALL);
+}
+
+TEST(net_rx_flow_steering, release_leaves_the_nic_steered)
+{
+    Bench bench;
+    {
+        auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+        EXPECT_TRUE(guard.has_value());
+        guard->release();
+        EXPECT_FALSE(guard->holds());
+        EXPECT_EQ(guard->plan().rules.size(), 2U);  // still says what it installed
+    }
+    EXPECT_EQ(bench.nic.rules().size(), 2U);
+    EXPECT_TRUE(bench.rss.table() == SPREAD_WITHOUT_THREE);
+    EXPECT_EQ(bench.rss.writes().size(), 1U);
+}
+
+TEST(net_rx_flow_steering, a_dead_owners_leftovers_go_and_the_drivers_default_comes_back)
+{
+    Bench bench;
+    bench.nic.place(ethertype_rule(8, 1, 0x88f7));  // a previous run's, in our range
+    bench.nic.place(pcp_rule(11, 2, 5));            // and another
+    bench.nic.place(ethertype_rule(3, 0, 0x0800));  // somebody else's, outside it
+    bench.rss.set_table({1, 1, 1, 1, 1, 1, 1, 1});  // the dead owner's spread
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_TRUE(guard.has_value());
+    EXPECT_EQ(guard->leftovers(), 2U);
+    EXPECT_EQ(bench.nic.rules().size(), 3U);  // the outsider and our two
+    EXPECT_TRUE(bench.rss.table() == SPREAD_WITHOUT_THREE);
+
+    EXPECT_TRUE(guard->restore().has_value());
+    EXPECT_EQ(bench.nic.rules().size(), 1U);
+    EXPECT_EQ(bench.nic.rules()[0].location, 3U);
+    EXPECT_EQ(bench.rss.writes().size(), 2U);
+    EXPECT_TRUE(bench.rss.writes()[1].table.empty());  // the driver's default, not the dead owner's table
+}
+
+TEST(net_rx_flow_steering, a_nic_without_rss_keeps_the_rules_alone)
+{
+    Bench bench;
+    bench.rss.set_table({});
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_TRUE(guard.has_value());
+    EXPECT_TRUE(guard->holds());
+    EXPECT_FALSE(guard->wrote_rss());
+    EXPECT_EQ(bench.nic.rules().size(), 2U);
+
+    EXPECT_TRUE(guard->restore().has_value());
+    EXPECT_TRUE(bench.nic.rules().empty());
+    EXPECT_TRUE(bench.rss.writes().empty());
+}
+
+TEST(net_rx_flow_steering, a_table_already_spread_so_is_not_written)
+{
+    Bench bench;
+    bench.rss.set_table(SPREAD_WITHOUT_THREE);
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_TRUE(guard.has_value());
+    EXPECT_FALSE(guard->wrote_rss());
+    EXPECT_TRUE(guard->restore().has_value());
+    EXPECT_TRUE(bench.rss.writes().empty());
+    EXPECT_TRUE(bench.nic.rules().empty());
+}
+
+TEST(net_rx_flow_steering, no_queue_left_for_the_rest_leaves_the_table_alone)
+{
+    Bench bench;
+    auto plan = avb_plan();
+    plan.rss_excluded = {0, 1, 2, 3};
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", std::move(plan));
+    EXPECT_TRUE(guard.has_value());
+    EXPECT_FALSE(guard->wrote_rss());
+    EXPECT_TRUE(bench.rss.writes().empty());
+    guard->release();
+}
+
+TEST(net_rx_flow_steering, a_plan_without_ntuple_leaves_the_filters_alone)
+{
+    Bench bench;
+    auto plan = avb_plan();
+    plan.ntuple = false;
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", std::move(plan));
+    EXPECT_TRUE(guard.has_value());
+    EXPECT_FALSE(guard->enabled_ntuple());
+    EXPECT_FALSE(bench.nic.ntuple_flag());
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::ntuple_read), 0U);
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::ntuple_write), 0U);
+}
+
+TEST(net_rx_flow_steering, filters_already_on_are_not_written)
+{
+    Bench bench;
+    bench.nic.set_ntuple_flag(true);
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_TRUE(guard.has_value());
+    EXPECT_FALSE(guard->enabled_ntuple());
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::ntuple_write), 0U);
+}
+
+TEST(net_rx_flow_steering, a_plan_the_nic_cannot_take_is_refused_before_anything_is_touched)
+{
+    Bench bench;
+    auto plan = avb_plan();
+    plan.rules[0].queue = 4;
+    auto const guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", std::move(plan));
+    EXPECT_FALSE(guard.has_value());
+    EXPECT_TRUE(guard.error() == std::errc::invalid_argument);
+    EXPECT_EQ(bench.nic.calls().size(), 1U);  // the queue count, and nothing after it
+    EXPECT_TRUE(bench.rss.writes().empty());
+}
+
+TEST(net_rx_flow_steering, a_nic_without_a_classifier_is_left_untouched)
+{
+    Bench bench;
+    bench.nic.set_unsupported();
+    auto const guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_FALSE(guard.has_value());
+    EXPECT_TRUE(guard.error() == std::errc::operation_not_supported);
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::insert), 0U);
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::ntuple_write), 0U);
+    EXPECT_TRUE(bench.rss.writes().empty());
+}
+
+TEST(net_rx_flow_steering, a_refused_filter_switch_stops_before_any_rule)
+{
+    Bench bench;
+    bench.nic.fail_next_ntuple_write(std::make_error_code(std::errc::operation_not_permitted));
+    auto const guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_FALSE(guard.has_value());
+    EXPECT_TRUE(guard.error() == std::errc::operation_not_permitted);
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::insert), 0U);
+    EXPECT_TRUE(bench.rss.writes().empty());
+}
+
+TEST(net_rx_flow_steering, a_refused_rule_undoes_the_ones_before_it)
+{
+    Bench bench;
+    bench.nic.fail_insert_after(1, std::make_error_code(std::errc::invalid_argument));
+    auto const guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_FALSE(guard.has_value());
+    EXPECT_TRUE(guard.error() == std::errc::invalid_argument);
+    EXPECT_TRUE(bench.nic.rules().empty());  // the first rule went in and came out again
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::insert), 2U);
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::remove), 1U);
+    EXPECT_TRUE(bench.rss.writes().empty());
+    EXPECT_TRUE(bench.nic.ntuple_flag());  // on, and stays on
+}
+
+TEST(net_rx_flow_steering, a_refused_table_write_undoes_the_rules)
+{
+    Bench bench;
+    bench.rss.fail_next_write(std::make_error_code(std::errc::operation_not_permitted));
+    auto const guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_FALSE(guard.has_value());
+    EXPECT_TRUE(guard.error() == std::errc::operation_not_permitted);
+    EXPECT_TRUE(bench.nic.rules().empty());
+    EXPECT_TRUE(bench.rss.table() == SPREAD_OVER_ALL);
+}
+
+TEST(net_rx_flow_steering, a_resized_table_is_refused_at_restore_and_the_rules_still_go)
+{
+    Bench bench;
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_TRUE(guard.has_value());
+    bench.rss.set_table({0, 1, 2, 0});  // the channel count moved under us
+
+    auto const restored = guard->restore();
+    EXPECT_FALSE(restored.has_value());
+    EXPECT_TRUE(restored.error() == std::errc::state_not_recoverable);
+    EXPECT_TRUE(bench.nic.rules().empty());
+    EXPECT_EQ(bench.rss.writes().size(), 1U);  // the steer's write alone; nothing was invented
+    EXPECT_FALSE(guard->holds());              // tried once: nothing more is owed
+}
+
+TEST(net_rx_flow_steering, a_refused_removal_is_reported_and_the_rest_still_go)
+{
+    Bench bench;
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_TRUE(guard.has_value());
+    bench.nic.fail_next_remove(std::make_error_code(std::errc::io_error));
+
+    auto const restored = guard->restore();
+    EXPECT_FALSE(restored.has_value());
+    EXPECT_TRUE(restored.error() == std::errc::io_error);
+    EXPECT_EQ(bench.nic.rules().size(), 1U);  // the one whose removal was refused
+    EXPECT_EQ(bench.nic.count(RxFlowRecorder::Op::remove), 2U);
+    EXPECT_TRUE(bench.rss.table() == SPREAD_OVER_ALL);
+    EXPECT_FALSE(guard->holds());
+}
+
+TEST(net_rx_flow_steering, a_guard_assigned_over_a_live_one_restores_it_first)
+{
+    Bench first;
+    Bench second;
+    auto a = RxFlowSteering::steer(first.nic, first.rss, "eth0", avb_plan());
+    auto b = RxFlowSteering::steer(second.nic, second.rss, "eth1", avb_plan());
+    EXPECT_TRUE(a.has_value());
+    EXPECT_TRUE(b.has_value());
+
+    *a = std::move(*b);
+    EXPECT_TRUE(first.nic.rules().empty());  // the first NIC was put back on the way out
+    EXPECT_TRUE(first.rss.table() == SPREAD_OVER_ALL);
+    EXPECT_TRUE(a->holds());
+    EXPECT_FALSE(b->holds());  // NOLINT(bugprone-use-after-move) the moved-from state is the point
+    EXPECT_EQ(second.nic.rules().size(), 2U);
+
+    EXPECT_TRUE(a->restore().has_value());
+    EXPECT_TRUE(second.nic.rules().empty());
+}
+
+TEST(net_rx_flow_steering, a_moved_from_guard_owes_nothing)
+{
+    Bench bench;
+    auto guard = RxFlowSteering::steer(bench.nic, bench.rss, "eth0", avb_plan());
+    EXPECT_TRUE(guard.has_value());
+    RxFlowSteering taken{std::move(*guard)};
+    EXPECT_FALSE(guard->holds());  // NOLINT(bugprone-use-after-move) the moved-from state is the point
+    EXPECT_TRUE(taken.holds());
+    EXPECT_EQ(taken.plan().rules.size(), 2U);
+    EXPECT_TRUE(taken.restore().has_value());
+    EXPECT_TRUE(bench.nic.rules().empty());
+}
+
+TEST(net_rx_flow_steering, a_default_guard_owes_nothing)
+{
+    RxFlowSteering const guard;
+    EXPECT_FALSE(guard.holds());
+    EXPECT_FALSE(guard.wrote_rss());
+    EXPECT_FALSE(guard.enabled_ntuple());
+    EXPECT_EQ(guard.leftovers(), 0U);
+    EXPECT_TRUE(guard.plan().rules.empty());
 }
 
 TEST_MAIN(statusbar_net, net_rx_flow_test)

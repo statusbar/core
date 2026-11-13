@@ -3,6 +3,8 @@
 
 #include "statusbar/net/net_rx_flow.hpp"
 
+#include "statusbar/status/catch_or_status.hpp"
+
 #include <algorithm>
 #include <system_error>
 #include <utility>
@@ -322,6 +324,193 @@ auto clear_rx_flow_rules(RxFlowControl& control, std::string_view const interfac
         ++removed;
     }
     return removed;
+}
+
+// ---------------------------------------------------------------------------
+// RxFlowSteering
+// ---------------------------------------------------------------------------
+
+RxFlowSteering::RxFlowSteering(
+    RxFlowControl& flows, RssControl& rss, std::string_view const interface_name, RxFlowPlan plan, uint32_t const rx_queues)
+    : installed_{.interface = std::string{interface_name}, .plan = std::move(plan), .rx_queues = rx_queues}
+    , owed_{.flows = &flows, .rss = &rss}
+{}
+
+RxFlowSteering::RxFlowSteering(RxFlowSteering&& other) noexcept
+    : installed_{std::move(other.installed_)}
+    , owed_{std::exchange(other.owed_, Owed{})}
+{}
+
+auto RxFlowSteering::operator=(RxFlowSteering&& other) noexcept -> RxFlowSteering&
+{
+    if (this != &other) {
+        // Whatever this guard still owed is owed on the way out, before it
+        // takes on another plan's debt.
+        (void)restore();
+        installed_ = std::move(other.installed_);
+        owed_ = std::exchange(other.owed_, Owed{});
+    }
+    return *this;
+}
+
+RxFlowSteering::~RxFlowSteering()
+{
+    // A destructor has nobody to report to; catch_or_status is the library's
+    // one catch boundary, and calls restore() straight under -fno-exceptions.
+    (void)catch_or_status([this] { return restore(); }, std::errc::operation_canceled);
+}
+
+auto RxFlowSteering::release() noexcept -> void
+{
+    owed_ = Owed{};
+}
+
+auto RxFlowSteering::steer(RxFlowControl& flows, RssControl& rss, std::string_view const interface_name, RxFlowPlan plan)
+    -> StatusValue<RxFlowSteering>
+{
+    auto const rx_queues = flows.rx_queues(interface_name);
+    if (!rx_queues) {
+        return failure(rx_queues.error());
+    }
+    if (auto const checked = detail::check_rx_flow_plan(plan, *rx_queues); !checked) {
+        return failure(checked.error());
+    }
+    RxFlowSteering steering{flows, rss, interface_name, std::move(plan), *rx_queues};
+    if (auto const status = steering.install(); !status) {
+        (void)steering.restore();  // what got in comes out again; the refusal is the news
+        return failure(status.error());
+    }
+    return steering;
+}
+
+auto RxFlowSteering::install() -> Status
+{
+    if (auto const status = clear_leftovers(); !status) {
+        return status;
+    }
+    if (auto const status = enable_ntuple(); !status) {
+        return status;
+    }
+    if (auto const status = insert_rules(); !status) {
+        return status;
+    }
+    return steer_rss();
+}
+
+auto RxFlowSteering::clear_leftovers() -> Status
+{
+    auto const removed = clear_rx_flow_rules(*owed_.flows, installed_.interface, installed_.plan.locations);
+    if (!removed) {
+        return failure(removed.error());
+    }
+    installed_.leftovers = *removed;
+    return success();
+}
+
+auto RxFlowSteering::ntuple_write_due() const -> StatusValue<bool>
+{
+    if (!installed_.plan.ntuple) {
+        return false;
+    }
+    auto const enabled = owed_.flows->ntuple(installed_.interface);
+    if (!enabled) {
+        return failure(enabled.error());
+    }
+    return !*enabled;
+}
+
+auto RxFlowSteering::enable_ntuple() -> Status
+{
+    auto const due = ntuple_write_due();
+    if (!due) {
+        return failure(due.error());
+    }
+    if (!*due) {
+        return success();
+    }
+    if (auto const status = owed_.flows->set_ntuple(installed_.interface, true); !status) {
+        return status;
+    }
+    installed_.enabled_ntuple = true;
+    return success();
+}
+
+auto RxFlowSteering::insert_rules() -> Status
+{
+    for (auto const& rule : installed_.plan.rules) {
+        if (auto const status = owed_.flows->insert(installed_.interface, rule); !status) {
+            return status;
+        }
+        ++owed_.inserted;
+    }
+    return success();
+}
+
+auto RxFlowSteering::steer_rss() -> Status
+{
+    auto current = owed_.rss->indirection(installed_.interface);
+    if (!current) {
+        // No RSS: the rules alone steer, and there is no table to put back.
+        return current.error() == std::errc::operation_not_supported ? success() : failure(current.error());
+    }
+    // A table found beside leftovers is the dead owner's, whatever its plan
+    // was; the only honest restore is the driver's default.
+    owed_.default_rss = installed_.leftovers != 0;
+    auto const wanted = rss_indirection_excluding(current->size(), installed_.rx_queues, installed_.plan.rss_excluded);
+    if (wanted.empty() || wanted == *current) {
+        return success();
+    }
+    return write_rss(wanted, std::move(*current));
+}
+
+auto RxFlowSteering::write_rss(RssIndirection const& wanted, RssIndirection current) -> Status
+{
+    if (auto const status = owed_.rss->set_indirection(installed_.interface, wanted); !status) {
+        return status;
+    }
+    owed_.previous = std::move(current);
+    return success();
+}
+
+auto RxFlowSteering::restore_rss() -> Status
+{
+    if (owed_.default_rss) {
+        return owed_.rss->set_indirection(installed_.interface, {});  // an empty table asks for the driver's default
+    }
+    if (owed_.previous.empty()) {
+        return success();
+    }
+    if (auto const current = owed_.rss->indirection(installed_.interface); current && current->size() != owed_.previous.size()) {
+        // The channel count changed under us: the table we hold no longer
+        // describes this NIC, and fitting it would be inventing a layout.
+        return failure(std::make_error_code(std::errc::state_not_recoverable));
+    }
+    return owed_.rss->set_indirection(installed_.interface, owed_.previous);
+}
+
+auto RxFlowSteering::remove_rules() -> Status
+{
+    Status result = success();
+    for (size_t index = 0; index < owed_.inserted; ++index) {
+        auto const status = owed_.flows->remove(installed_.interface, installed_.plan.rules[index].location);
+        if (!status && result) {
+            result = status;  // the first refusal is the one reported; the rest are still tried
+        }
+    }
+    return result;
+}
+
+auto RxFlowSteering::restore() -> Status
+{
+    if (!holds()) {
+        return success();
+    }
+    Status result = restore_rss();
+    if (auto const status = remove_rules(); !status && result) {
+        result = status;
+    }
+    release();
+    return result;
 }
 
 }  // namespace statusbar::net

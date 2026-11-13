@@ -91,6 +91,7 @@ int main() {
 - `statusbar/net/net_netlink.hpp` — the netlink framing (`netlink::put_header`, `put_attribute`, `walk_messages`, `walk_attributes`, `find_attribute`, `ack_status`, `end_status`) and, on Linux, `netlink::Socket`, the blocking request/reply socket the netlink clients share.
 - `statusbar/net/net_netdev_features.hpp` — the netdev generic-netlink family: `netdev::NetdevClient`, `DeviceFeatures` / `XskFeatures`, `query_xsk_features`, `launch_time_supported` (Linux); the framing and parsers build everywhere.
 - `statusbar/net/net_rss.hpp` — ethtool RSS indirection: read a NIC's table, steer every bucket to one queue (`RssSteering` puts the table back when it goes out of scope), with a recorder double for tests.
+- `statusbar/net/net_rx_flow.hpp` — ethtool RX classifier rules: one EtherType or one VLAN priority steered to an RX queue (`RxFlowRule`, `RxFlowPlan`), and `RxFlowSteering`, which installs a plan's rules with an RSS table that keeps the other traffic off their queues and removes both again; `RxFlowControl` is the seam, `RxFlowEthtool` the NIC, `RxFlowRecorder` (`net_rx_flow_recorder.hpp`) the test double.
 
 ## Dependencies
 
@@ -110,6 +111,7 @@ int main() {
 - `RawnetContext` needs `CAP_NET_RAW` on Linux; root or BPF device access on macOS. AF_XDP needs a kernel with `CONFIG_XDP_SOCKETS` (≥ 5.4), libbpf, libxdp, and an XDP-capable driver — otherwise `XdpContext` compiles as a stub. A driver without native XDP (the Raspberry Pi 5's `macb`, for one) gets generic attach and a copy-mode bind, which `attach_mode()` and `zero_copy()` report.
 - `SocketAddress::from_string` takes host *and* port plus a socket type (`SocketStream` / `SocketDatagram`) — the type drives `getaddrinfo` hints.
 - `NetError::would_block` is the expected end-of-drain on nonblocking `recv` / `send` — treat as success, not failure.
+- **RX flow steering.** `RxFlowSteering::steer(flows, rss, iface, plan)` owns a range of classifier slots: it removes a dead owner's leftovers from that range, turns the ntuple filters on when the plan asks (igb needs them for a VLAN priority rule; they are never turned off again, as igb and igc reset the adapter for it), inserts the plan's rules and spreads the RSS table over the queues the rules leave alone. Its destructor and `restore()` take the rules out and put the table back — the table read before, or the driver's default when leftovers showed the table found was another run's. A NIC without RSS keeps the rules alone; one without a classifier answers `operation_not_supported`. Needs `CAP_NET_ADMIN`.
 - **Two clocks, told.** The reactor's `now_ns` is control-plane time (`steady_clock`); an `EthernetRxSlot::timestamp_ns` is on `CLOCK_MONOTONIC_RAW`. Neither is read by the code that handles a frame: the reactor tells its ports, a drain tells its port. See [TIME_POLICY.md](TIME_POLICY.md).
 
 ### The netdev family

@@ -193,4 +193,111 @@ class RxFlowEthtool final : public RxFlowControl
 [[nodiscard]] auto clear_rx_flow_rules(RxFlowControl& control, std::string_view interface_name, RxFlowRange range)
     -> StatusValue<size_t>;
 
+// ---------------------------------------------------------------------------
+// Who takes the rules out again
+// ---------------------------------------------------------------------------
+//
+// RxFlowSteering, as a guard, for the reason RssSteering is one: a classifier
+// rule outlives the process that inserted it, and a NIC left with a stale rule
+// steers a stream at a queue nobody reads. Best effort, as any destructor is;
+// a crash leaks the rules, which is what the range is for - the next owner
+// finds them in its range and removes them before it installs its own.
+
+/// Holds a plan's rules and RSS table on an interface, and puts both back.
+///
+/// steer() clears the plan's range of a previous owner's leftovers, turns the
+/// ntuple filters on when the plan asks and they are off, inserts the rules,
+/// and writes an RSS table that leaves the plan's queues out. restore() takes
+/// the rules out and puts the table back: the one read before the write, or
+/// the driver's default when the table found was a dead owner's. The ntuple
+/// filters stay on either way: igb and igc reset the adapter to change them,
+/// and igb its PHC with it.
+class RxFlowSteering
+{
+  public:
+    /// A guard that owes nothing.
+    RxFlowSteering() = default;
+
+    ~RxFlowSteering();
+
+    RxFlowSteering(RxFlowSteering&& other) noexcept;
+    /// The guard assigned over restores first, so steer() a plan for a range
+    /// a live guard holds only after that guard's restore(): its restore would
+    /// otherwise take the new rules out.
+    auto operator=(RxFlowSteering&& other) noexcept -> RxFlowSteering&;
+
+    RxFlowSteering(RxFlowSteering const&) = delete;
+    auto operator=(RxFlowSteering const&) -> RxFlowSteering& = delete;
+
+    /// Install `plan` on `interface_name`. On any refusal what was done is
+    /// undone and the refusal returned: `invalid_argument` from
+    /// check_rx_flow_plan, `operation_not_supported` from a NIC with no
+    /// classifier, the driver's own otherwise. A NIC without RSS keeps the
+    /// rules alone.
+    /// @param flows The classifier to steer; must outlive the guard
+    /// @param rss The RSS table to spread; must outlive the guard
+    /// @param interface_name The interface to steer
+    /// @param plan What to install
+    [[nodiscard]] static auto steer(RxFlowControl& flows, RssControl& rss, std::string_view interface_name, RxFlowPlan plan)
+        -> StatusValue<RxFlowSteering>;
+
+    /// The RSS table back and the rules removed, once: the first refusal is
+    /// returned and nothing more is owed, since a second try would meet the
+    /// same NIC. Success when nothing was owed, so it is safe to call twice.
+    /// Refuses the table with `state_not_recoverable` when its size changed
+    /// under us (the channel count moved), and still removes the rules.
+    [[nodiscard]] auto restore() -> Status;
+
+    /// Give up the restore deliberately, leaving the NIC steered.
+    auto release() noexcept -> void;
+
+    /// Whether a restore is still owed.
+    [[nodiscard]] auto holds() const noexcept -> bool { return owed_.flows != nullptr; }
+    /// How many rules a previous owner had left in the range at steer().
+    [[nodiscard]] auto leftovers() const noexcept -> size_t { return installed_.leftovers; }
+    /// Whether steer() turned the ntuple filters on (they stay on).
+    [[nodiscard]] auto enabled_ntuple() const noexcept -> bool { return installed_.enabled_ntuple; }
+    /// Whether steer() wrote an RSS table, so a restore puts one back.
+    [[nodiscard]] auto wrote_rss() const noexcept -> bool { return !owed_.previous.empty(); }
+    /// The plan installed.
+    [[nodiscard]] auto plan() const noexcept -> RxFlowPlan const& { return installed_.plan; }
+
+  private:
+    /// What steer() installed, kept for the report after a restore.
+    struct Installed
+    {
+        std::string interface;
+        RxFlowPlan plan;
+        uint32_t rx_queues{0};
+        size_t leftovers{0};
+        bool enabled_ntuple{false};
+    };
+
+    /// What is owed to the NIC until restore() or release(); empty owes nothing.
+    struct Owed
+    {
+        RxFlowControl* flows{nullptr};
+        RssControl* rss{nullptr};
+        RssIndirection previous;  ///< the table read before the write, to put back
+        size_t inserted{0};       ///< how many of the plan's rules are in, to take out
+        bool default_rss{false};  ///< put the driver's default back, not `previous`
+    };
+
+    RxFlowSteering(RxFlowControl& flows, RssControl& rss, std::string_view interface_name, RxFlowPlan plan, uint32_t rx_queues);
+
+    [[nodiscard]] auto install() -> Status;
+    [[nodiscard]] auto clear_leftovers() -> Status;
+    /// Whether the plan wants the ntuple filters on and they are off.
+    [[nodiscard]] auto ntuple_write_due() const -> StatusValue<bool>;
+    [[nodiscard]] auto enable_ntuple() -> Status;
+    [[nodiscard]] auto insert_rules() -> Status;
+    [[nodiscard]] auto steer_rss() -> Status;
+    [[nodiscard]] auto write_rss(RssIndirection const& wanted, RssIndirection current) -> Status;
+    [[nodiscard]] auto restore_rss() -> Status;
+    [[nodiscard]] auto remove_rules() -> Status;
+
+    Installed installed_;
+    Owed owed_;
+};
+
 }  // namespace statusbar::net

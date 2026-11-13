@@ -107,6 +107,18 @@ auto rss_indirection(std::string_view const interface_name) -> StatusValue<RssIn
     return RssIndirection(words.begin() + IndirHeaderWords, words.end());
 }
 
+auto rx_queue_count(std::string_view const interface_name) -> StatusValue<uint32_t>
+{
+    ethtool_rxnfc rings{};
+    rings.cmd = ETHTOOL_GRXRINGS;
+    if (auto const status = ethtool_ioctl(interface_name, &rings); !status) {
+        return failure(status.error());
+    }
+    // data is a __u64; a queue count that does not fit in 32 bits is not a
+    // thing, and clamping keeps the comparison honest if one ever appears.
+    return rings.data > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(rings.data);
+}
+
 namespace {
 
 /// How many RX queues the interface has, or 0 if it would not say. Not an
@@ -114,14 +126,7 @@ namespace {
 /// driver that will not report it still checks the write itself.
 [[nodiscard]] auto read_rx_queue_count(std::string_view const interface_name) -> uint32_t
 {
-    ethtool_rxnfc rings{};
-    rings.cmd = ETHTOOL_GRXRINGS;
-    if (auto const status = ethtool_ioctl(interface_name, &rings); !status) {
-        return 0;
-    }
-    // data is a __u64; a queue count that does not fit in 32 bits is not a
-    // thing, and clamping keeps the comparison honest if one ever appears.
-    return rings.data > UINT32_MAX ? UINT32_MAX : static_cast<uint32_t>(rings.data);
+    return rx_queue_count(interface_name).value_or(0);
 }
 
 }  // namespace
@@ -154,6 +159,11 @@ auto set_rss_indirection_all(std::string_view const interface_name, uint32_t con
 #else  // !__linux__
 
 auto rss_indirection(std::string_view const) -> StatusValue<RssIndirection>
+{
+    return failure(std::make_error_code(std::errc::operation_not_supported));
+}
+
+auto rx_queue_count(std::string_view const) -> StatusValue<uint32_t>
 {
     return failure(std::make_error_code(std::errc::operation_not_supported));
 }

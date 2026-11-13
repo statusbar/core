@@ -71,6 +71,13 @@ using RssIndirection = std::vector<uint32_t>;
 /// @param table One RX queue index per hash bucket
 [[nodiscard]] auto set_rss_indirection(std::string_view interface_name, std::span<uint32_t const> table) -> Status;
 
+/// How many RX queues the interface has (ETHTOOL_GRXRINGS). Needs no
+/// privilege. `operation_not_supported` for a driver that will not say; a
+/// caller refusing a queue the NIC cannot have reads that as "the driver's
+/// own check is all there is".
+/// @param interface_name The interface to ask, 1 to IFNAMSIZ-1 bytes
+[[nodiscard]] auto rx_queue_count(std::string_view interface_name) -> StatusValue<uint32_t>;
+
 /// A table of `entries` buckets, every one of them `queue_id`. Public because
 /// a caller restoring or auditing a table needs to build the one we would
 /// have written.

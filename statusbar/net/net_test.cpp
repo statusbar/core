@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -97,6 +98,27 @@ TEST(net_error, error_message_not_empty)
 {
     std::error_code ec = NetError::socket_creation_failed;
     EXPECT_TRUE(!ec.message().empty());
+}
+
+//
+// errno_code tests
+//
+
+// The common form reads the current errno.
+TEST(net_errno_code, the_default_is_the_current_errno)
+{
+    errno = ENOENT;
+    EXPECT_EQ(errno_code(), std::error_code(ENOENT, std::system_category()));
+}
+
+// A caller that saved errno before a close() or a log line hands the saved
+// value in, and the code is that value whatever errno is by then.
+TEST(net_errno_code, a_saved_errno_is_the_code_whatever_errno_is_now)
+{
+    int const saved = EACCES;
+    errno = EINTR;
+    EXPECT_EQ(errno_code(saved), std::error_code(EACCES, std::system_category()));
+    EXPECT_EQ(errno_code(saved).value(), EACCES);
 }
 
 //

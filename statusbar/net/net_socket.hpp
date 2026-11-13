@@ -204,11 +204,13 @@ using FileDescriptor = ::statusbar::FileDescriptor;
     return success();
 }
 
-/// The current errno as a std::error_code, for the many call sites that would
-/// otherwise spell out `{errno, std::system_category()}`.
-[[nodiscard]] inline auto errno_code() noexcept -> std::error_code
+/// @p err (the current errno by default) as a std::error_code, for the many
+/// call sites that would otherwise spell out `{errno, std::system_category()}`.
+/// Pass a saved errno once a later call - a close(), a log line - may have
+/// changed the current one.
+[[nodiscard]] inline auto errno_code(int const err = errno) noexcept -> std::error_code
 {
-    return {errno, std::system_category()};
+    return {err, std::system_category()};
 }
 
 /// An IPv4 UDP socket, close-on-exec and non-blocking from birth.

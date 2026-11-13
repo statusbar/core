@@ -213,4 +213,74 @@ TEST(launch_order, the_callable_form_reads_its_clock_once_and_forwards)
     EXPECT_EQ(order.next(T + 1, tai_now_ns), T + 1);  // a free function is a clock too
 }
 
+// A frame committed after its own departure is late: it keeps its time, as
+// the NIC sends such a frame at once, and the lateness is counted and kept.
+TEST(launch_order, a_frame_committed_after_its_time_is_counted_late_and_keeps_its_time)
+{
+    LaunchOrder order;
+    EXPECT_EQ(order.next(T - 400'000, T), T - 400'000);
+    EXPECT_EQ(order.launched_late(), std::uint64_t{1});
+    EXPECT_EQ(order.max_late_ns(), std::uint64_t{400'000});
+    EXPECT_EQ(order.clamped(), std::uint64_t{0});
+}
+
+// The largest lateness is the one remembered; a smaller one later keeps it.
+TEST(launch_order, the_largest_lateness_is_the_one_remembered)
+{
+    LaunchOrder order;
+    (void)order.next(T - 100'000, T);
+    (void)order.next(T + 1'000'000 - 900'000, T + 1'000'000);
+    (void)order.next(T + 2'000'000 - 50'000, T + 2'000'000);
+    EXPECT_EQ(order.launched_late(), std::uint64_t{3});
+    EXPECT_EQ(order.max_late_ns(), std::uint64_t{900'000});
+}
+
+// A frame on time or ahead of now, and an untimed one, are not late.
+TEST(launch_order, a_frame_on_time_or_untimed_is_not_late)
+{
+    LaunchOrder order;
+    (void)order.next(T, T);
+    (void)order.next(T + 250'000, T);
+    (void)order.next(0, T);
+    EXPECT_EQ(order.launched_late(), std::uint64_t{0});
+    EXPECT_EQ(order.max_late_ns(), std::uint64_t{0});
+}
+
+// A failed clock read says nothing about lateness: with no `now` there is
+// nothing to be late against, and nothing is counted.
+TEST(launch_order, a_failed_clock_read_counts_no_frame_late)
+{
+    LaunchOrder order;
+    (void)order.next(T, T);
+    (void)order.next(T - 700'000, 0);
+    (void)order.next(T + 5'000'000, 0);
+    EXPECT_EQ(order.launched_late(), std::uint64_t{0});
+    EXPECT_EQ(order.max_late_ns(), std::uint64_t{0});
+}
+
+// A wanted time a second or more behind now is the clock having stepped
+// forward over a stale queue, which steps() and the clamp already describe;
+// it is not a late frame. Just under the threshold still is.
+TEST(launch_order, a_second_or_more_behind_is_a_step_not_a_late_frame)
+{
+    LaunchOrder order;
+    (void)order.next(T - LaunchOrder::STEP_NS, T);
+    (void)order.next(T - LaunchOrder::STEP_NS - 1, T);
+    EXPECT_EQ(order.launched_late(), std::uint64_t{0});
+    (void)order.next(T - LaunchOrder::STEP_NS + 1, T);
+    EXPECT_EQ(order.launched_late(), std::uint64_t{1});
+    EXPECT_EQ(order.max_late_ns(), LaunchOrder::STEP_NS - 1);
+}
+
+// reset() zeroes the late counters with the others.
+TEST(launch_order, reset_clears_the_late_counters_too)
+{
+    LaunchOrder order;
+    (void)order.next(T - 300'000, T);
+    EXPECT_EQ(order.launched_late(), std::uint64_t{1});
+    order.reset();
+    EXPECT_EQ(order.launched_late(), std::uint64_t{0});
+    EXPECT_EQ(order.max_late_ns(), std::uint64_t{0});
+}
+
 TEST_MAIN(statusbar_net, net_launch_order_test)

@@ -22,7 +22,10 @@
 ///   * a longer clamp is a frame that missed its slot, which is worth seeing;
 ///   * a jump backwards of a second or more is the *clock* moving, not a late
 ///     frame, so the ordering follows it instead of stalling the talker for
-///     the length of the step.
+///     the length of the step;
+///   * a frame whose wanted time had already passed when it was committed is
+///     late: it keeps its time (the NIC sends it at once) and is counted, so
+///     a talker that runs behind its own departures is visible as such.
 ///
 /// `next()` runs on the real-time thread and does no allocation, no syscall
 /// and no locking. The counters are atomic because a soak test reads them from
@@ -101,6 +104,7 @@ class LaunchOrder
         if (now_ns == 0) {
             return unclocked(wanted_ns);
         }
+        note_lateness(wanted_ns, now_ns);
         std::uint64_t const asked = wanted_ns == 0 ? now_ns : wanted_ns;
         std::uint64_t const given = ordered(asked, now_ns);
         last_ns_ = given;
@@ -125,6 +129,14 @@ class LaunchOrder
     /// Times the clock stepped backwards under us.
     [[nodiscard]] auto steps() const noexcept -> std::uint64_t { return steps_.load(std::memory_order_relaxed); }
 
+    /// Frames whose wanted time had already passed when they were committed.
+    /// Each keeps that time and is ordered like any other; the count is the
+    /// talker running behind its own departures, which no clamp shows.
+    [[nodiscard]] auto launched_late() const noexcept -> std::uint64_t { return late_.load(std::memory_order_relaxed); }
+
+    /// The most a late frame's wanted time was behind `now`, in nanoseconds.
+    [[nodiscard]] auto max_late_ns() const noexcept -> std::uint64_t { return max_late_ns_.load(std::memory_order_relaxed); }
+
     /// Zero the counters. The ordering itself is kept, so this is safe to call
     /// on a live socket.
     auto reset() noexcept -> void
@@ -132,6 +144,8 @@ class LaunchOrder
         clamped_.store(0, std::memory_order_relaxed);
         max_clamp_ns_.store(0, std::memory_order_relaxed);
         steps_.store(0, std::memory_order_relaxed);
+        late_.store(0, std::memory_order_relaxed);
+        max_late_ns_.store(0, std::memory_order_relaxed);
     }
 
   private:
@@ -181,12 +195,35 @@ class LaunchOrder
         }
     }
 
+    /// A timed frame committed after its wanted time is late, and counted
+    /// with how far behind it was. A second or more behind is the clock
+    /// having stepped forward, not a frame that missed its slot, and is left
+    /// to steps(); an untimed frame has no time to be late for. Only called
+    /// with a real `now`: a failed clock read (0) counts nothing, see
+    /// unclocked().
+    auto note_lateness(std::uint64_t const wanted_ns, std::uint64_t const now_ns) noexcept -> void
+    {
+        if (wanted_ns == 0 || wanted_ns >= now_ns) {
+            return;
+        }
+        std::uint64_t const behind = now_ns - wanted_ns;
+        if (behind >= STEP_NS) {
+            return;
+        }
+        late_.fetch_add(1, std::memory_order_relaxed);
+        if (behind > max_late_ns_.load(std::memory_order_relaxed)) {
+            max_late_ns_.store(behind, std::memory_order_relaxed);
+        }
+    }
+
     /// Only next() touches this, and only from the real-time thread.
     std::uint64_t last_ns_{0};
 
     std::atomic<std::uint64_t> clamped_{0};
     std::atomic<std::uint64_t> max_clamp_ns_{0};
     std::atomic<std::uint64_t> steps_{0};
+    std::atomic<std::uint64_t> late_{0};
+    std::atomic<std::uint64_t> max_late_ns_{0};
 };
 
 }  // namespace statusbar::net

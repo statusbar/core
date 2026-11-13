@@ -3289,6 +3289,83 @@ TEST(xdp_membership, a_membership_ends_with_its_socket)
 
 #endif  // __linux__
 
+// The busy-poll bookkeeping and the stalled-ring detector are plain state
+// with no socket behind them, so they are checked on every platform.
+#include "statusbar/net/net_linux_xdp.hpp"
+
+#include <cstdint>
+#include <type_traits>
+
+// Off, armed by set(true), polling once a kick got through, off again by
+// set(false); a kick on an idle queue arms nothing.
+TEST(xdp_napi_busy_poll, armed_by_set_polling_after_a_kick)
+{
+    statusbar::net::detail::NapiBusyPoll poll;
+    EXPECT_FALSE(poll.on());
+    EXPECT_FALSE(poll.polling());
+    poll.kicked();
+    EXPECT_FALSE(poll.on());
+    poll.set(true);
+    EXPECT_TRUE(poll.on());
+    EXPECT_FALSE(poll.polling());
+    poll.kicked();
+    EXPECT_TRUE(poll.on());
+    EXPECT_TRUE(poll.polling());
+    poll.set(false);
+    EXPECT_FALSE(poll.on());
+    EXPECT_FALSE(poll.polling());
+}
+
+// Turning busy poll on again re-arms: the thread sleeps until the next kick.
+TEST(xdp_napi_busy_poll, set_again_rearms_and_swap_exchanges_states)
+{
+    statusbar::net::detail::NapiBusyPoll a;
+    statusbar::net::detail::NapiBusyPoll b;
+    a.set(true);
+    a.kicked();
+    a.set(true);
+    EXPECT_FALSE(a.polling());
+    a.kicked();
+    a.swap(b);
+    EXPECT_FALSE(a.on());
+    EXPECT_TRUE(b.polling());
+}
+
+// A stall is descriptors pending across two flushes with the kernel's
+// progress unchanged between them. The first flush with frames pending is
+// never a stall: there is nothing yet to compare against.
+TEST(xdp_tx_progress, pending_with_no_progress_since_the_last_flush_is_a_stall)
+{
+    using statusbar::net::detail::TxRingState;
+    statusbar::net::detail::TxProgress progress;
+    EXPECT_FALSE(progress.stalled(TxRingState{.pending = 4, .progress = 10}));
+    EXPECT_TRUE(progress.stalled(TxRingState{.pending = 4, .progress = 10}));
+    EXPECT_TRUE(progress.stalled(TxRingState{.pending = 6, .progress = 10}));
+}
+
+// Progress of any kind - consumption, or completion of a full ring - clears
+// the stall, and so does an empty ring on either side.
+TEST(xdp_tx_progress, progress_or_an_empty_ring_is_not_a_stall)
+{
+    using statusbar::net::detail::TxRingState;
+    statusbar::net::detail::TxProgress progress;
+    EXPECT_FALSE(progress.stalled(TxRingState{.pending = 4, .progress = 10}));
+    EXPECT_FALSE(progress.stalled(TxRingState{.pending = 4, .progress = 11}));
+    EXPECT_FALSE(progress.stalled(TxRingState{.pending = 0, .progress = 11}));
+    EXPECT_FALSE(progress.stalled(TxRingState{.pending = 3, .progress = 11}));
+    EXPECT_TRUE(progress.stalled(TxRingState{.pending = 3, .progress = 11}));
+    EXPECT_FALSE(progress.stalled(TxRingState{.pending = 0, .progress = 11}));
+    EXPECT_FALSE(progress.stalled(TxRingState{.pending = 0, .progress = 11}));
+}
+
+// The stalled-kick counter starts at zero with the rest.
+TEST(xdp_socket_stats, the_stalled_kick_counter_is_part_of_the_stats)
+{
+    statusbar::net::XdpSocketStats const stats{};
+    EXPECT_EQ(stats.tx_flush_stalled, std::uint64_t{0});
+    static_assert(std::is_trivially_copyable_v<statusbar::net::XdpSocketStats>);
+}
+
 //
 // Test Runner
 //

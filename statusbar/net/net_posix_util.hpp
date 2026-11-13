@@ -35,7 +35,9 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
-#if !defined(__linux__)
+#if defined(__linux__)
+#    include <linux/sockios.h>
+#else
 #    include <ifaddrs.h>
 
 #    include <net/if_dl.h>
@@ -173,6 +175,21 @@ inline auto name_ifreq(ifreq& ifr, std::string_view const iface) noexcept -> voi
 }
 
 #if defined(__linux__)
+
+/// SIOCETHTOOL on `iface` with `payload` - an ethtool command struct whose
+/// first word is its ETHTOOL_* command - as the ifr_data; the driver writes
+/// its answer back into the same struct. The one place the ethtool dance is
+/// spelled out: every ethtool caller (the RSS table, the RX flow rules)
+/// builds its command and hands it here. Errors as ifreq_ioctl().
+/// @param iface Interface name, 1 to IFNAMSIZ-1 bytes
+/// @param payload The command, rewritten in place by the driver
+template <typename Payload>
+[[nodiscard]] inline auto ethtool_ioctl(std::string_view const iface, Payload* const payload) noexcept -> Status
+{
+    ifreq ifr{};
+    set_ifr_data(ifr, payload);
+    return ifreq_ioctl(iface, SIOCETHTOOL, ifr);
+}
 
 /// View the ifreq.ifr_hwaddr.sa_data as a fixed 6-byte span. This is the
 /// MAC address payload returned by SIOCGIFHWADDR. Linux-only; BSD/macOS

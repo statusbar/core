@@ -111,9 +111,11 @@ constexpr std::string_view SYSFS_NET = "/sys/class/net/";
     return success();
 }
 
-/// Run an SIOCETHTOOL command whose payload is `data`.
+/// Run an SIOCETHTOOL command whose payload is `data`, through this
+/// module's interface_ioctl and its error contract (net_posix_util.hpp's
+/// ethtool_ioctl reports in the system category).
 template <typename Command>
-[[nodiscard]] auto ethtool_ioctl(std::string_view name, Command& data) noexcept -> Status
+[[nodiscard]] auto info_ethtool_ioctl(std::string_view name, Command& data) noexcept -> Status
 {
     ifreq ifr{};
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -256,7 +258,7 @@ auto driver_name(std::string_view const interface_name) -> StatusValue<std::stri
 {
     ethtool_drvinfo info{};
     info.cmd = ETHTOOL_GDRVINFO;
-    if (auto status = ethtool_ioctl(interface_name, info); !status) {
+    if (auto status = info_ethtool_ioctl(interface_name, info); !status) {
         return forward_failure(status);
     }
     // The kernel does not promise a terminator in a full field.

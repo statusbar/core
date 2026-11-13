@@ -64,9 +64,7 @@ constexpr size_t IndirHeaderWords = 2;
 /// Hand `words` to SIOCETHTOOL as the ifr_data payload.
 [[nodiscard]] auto ethtool_words(std::string_view const interface_name, std::vector<uint32_t>& words) -> Status
 {
-    ifreq request{};
-    set_ifr_data(request, words.data());
-    return ifreq_ioctl(interface_name, SIOCETHTOOL, request);
+    return ethtool_ioctl(interface_name, words.data());
 }
 
 /// An indirection-table request: the command, the bucket count, and room for
@@ -118,9 +116,7 @@ namespace {
 {
     ethtool_rxnfc rings{};
     rings.cmd = ETHTOOL_GRXRINGS;
-    ifreq request{};
-    set_ifr_data(request, &rings);
-    if (auto const status = ifreq_ioctl(interface_name, SIOCETHTOOL, request); !status) {
+    if (auto const status = ethtool_ioctl(interface_name, &rings); !status) {
         return 0;
     }
     // data is a __u64; a queue count that does not fit in 32 bits is not a

@@ -356,6 +356,89 @@ using FileDescriptor = ::statusbar::FileDescriptor;
     return success();
 }
 
+/// The interface unicast leaves by on an IPv4 or IPv6 (`family`) socket:
+/// `interface_index`, or 0 for the routing table's choice again.
+///
+/// Linux: IP_UNICAST_IF / IPV6_UNICAST_IF (ip(7), ipv6(7)), which read the
+/// index in network byte order, and which the kernel refuses with EINVAL on
+/// a socket already bound to a device with SO_BINDTODEVICE. Darwin and the
+/// BSDs: IP_BOUND_IF / IPV6_BOUND_IF, a host-order int. A platform with
+/// neither can only honour 0.
+[[nodiscard]] inline auto set_unicast_interface(int fd, int family, unsigned int interface_index) noexcept -> Status
+{
+#if defined(__linux__)
+    uint32_t const index = htonl(interface_index);
+    bool const set = family == AF_INET6 ? ::setsockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_IF, &index, sizeof(index)) == 0
+                                        : ::setsockopt(fd, IPPROTO_IP, IP_UNICAST_IF, &index, sizeof(index)) == 0;
+    return set ? success() : failure(errno_code());
+#elif defined(IP_BOUND_IF) && defined(IPV6_BOUND_IF)
+    int const index = static_cast<int>(interface_index);
+    bool const set = family == AF_INET6 ? ::setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &index, sizeof(index)) == 0
+                                        : ::setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &index, sizeof(index)) == 0;
+    return set ? success() : failure(errno_code());
+#else
+    (void)fd;
+    (void)family;
+    return interface_index == 0 ? success() : failure(std::errc::operation_not_supported);
+#endif
+}
+
+/// The hop limit of unicast from an IPv4 or IPv6 (`family`) socket: `ttl`, or
+/// 0 for the host's default again.
+///
+/// IP_TTL / IPV6_UNICAST_HOPS. For IPv6, -1 asks for the default on every
+/// stack (RFC 3493 section 5.1). For IPv4, Linux takes -1 the same way
+/// (ip(7)); Darwin and the BSDs document no such value, so the default is
+/// written out as IPDEFTTL (64, RFC 1340), which is what their stacks start
+/// a socket with.
+[[nodiscard]] inline auto set_unicast_hops(int fd, int family, uint8_t ttl) noexcept -> Status
+{
+#if defined(__linux__)
+    int const hops = ttl != 0 ? ttl : -1;
+#else
+    int const hops = ttl != 0 ? ttl : family == AF_INET6 ? -1 : IPDEFTTL;
+#endif
+    bool const set = family == AF_INET6 ? ::setsockopt(fd, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &hops, sizeof(hops)) == 0
+                                        : ::setsockopt(fd, IPPROTO_IP, IP_TTL, &hops, sizeof(hops)) == 0;
+    return set ? success() : failure(errno_code());
+}
+
+/// Prepare an IPv4 or IPv6 (`family`) socket to send unicast: out of the
+/// interface with index `interface_index` (0: the route) with hop limit `ttl`
+/// (0: the default). The unicast counterpart of set_multicast_send().
+///
+/// Both options are written whatever the values, so a socket configured a
+/// second time keeps nothing of the first: 0 and 0 is a socket back on the
+/// route with the host's TTL, not one left as it was.
+[[nodiscard]] inline auto set_unicast_send(int fd, int family, unsigned int interface_index, uint8_t ttl) noexcept -> Status
+{
+    if (auto const pinned = set_unicast_interface(fd, family, interface_index); !pinned) {
+        return pinned;
+    }
+    return set_unicast_hops(fd, family, ttl);
+}
+
+/// The socket's priority (SO_PRIORITY, socket(7)), which an mqprio root maps
+/// to a traffic class and a VLAN egress map to a PCP: 0 to 6 for any process,
+/// 7 to 15 with CAP_NET_ADMIN (EPERM otherwise).
+///
+/// Call it after set_dscp() or set_tos(), never before: on Linux IP_TOS sets
+/// the priority too, to the one the TOS maps to (rt_tos2priority()), and would
+/// undo this. Linux only; elsewhere there is no such option and the call
+/// succeeds doing nothing.
+[[nodiscard]] inline auto set_priority(int fd, int priority) noexcept -> Status
+{
+#if defined(__linux__)
+    if (::setsockopt(fd, SOL_SOCKET, SO_PRIORITY, &priority, sizeof(priority)) != 0) {
+        return failure(errno_code());
+    }
+#else
+    (void)fd;
+    (void)priority;
+#endif
+    return success();
+}
+
 /// A UDP socket that exists only to hold an IGMP membership for `group` on the
 /// interface with index `interface_index`, for as long as the returned
 /// descriptor lives.

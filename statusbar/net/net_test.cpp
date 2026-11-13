@@ -27,6 +27,7 @@
 #include <system_error>
 #include <vector>
 
+#include <net/if.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -119,6 +120,118 @@ TEST(net_errno_code, a_saved_errno_is_the_code_whatever_errno_is_now)
     errno = EINTR;
     EXPECT_EQ(errno_code(saved), std::error_code(EACCES, std::system_category()));
     EXPECT_EQ(errno_code(saved).value(), EACCES);
+}
+
+//
+// Unicast send and priority tests
+//
+
+namespace {
+
+/// The loopback interface's index, 0 when the host has none by either name.
+auto loopback_index() -> unsigned int
+{
+    auto const linux_name = ::if_nametoindex("lo");
+    return linux_name != 0 ? linux_name : ::if_nametoindex("lo0");
+}
+
+/// An int socket option read back, -1 when the read fails.
+auto read_int_option(int const fd, int const level, int const option) -> int
+{
+    int value = -1;
+    socklen_t length = sizeof(value);
+    if (::getsockopt(fd, level, option, &value, &length) != 0) {
+        return -1;
+    }
+    return value;
+}
+
+}  // namespace
+
+// The hop limit is written as asked and reads back as asked.
+TEST(net_unicast_send, the_hop_limit_reads_back)
+{
+    auto socket = make_udp_socket();
+    EXPECT_TRUE(socket.has_value());
+    EXPECT_TRUE(set_unicast_hops(socket->get(), AF_INET, 7).has_value());
+    EXPECT_EQ(read_int_option(socket->get(), IPPROTO_IP, IP_TTL), 7);
+    EXPECT_TRUE(set_unicast_hops(socket->get(), AF_INET, 200).has_value());
+    EXPECT_EQ(read_int_option(socket->get(), IPPROTO_IP, IP_TTL), 200);
+}
+
+// 0 is the host's default, not a TTL of 0: a socket set back to it sends
+// again with the stack's own value.
+TEST(net_unicast_send, a_hop_limit_of_zero_restores_the_default)
+{
+    auto socket = make_udp_socket();
+    EXPECT_TRUE(socket.has_value());
+    int const before = read_int_option(socket->get(), IPPROTO_IP, IP_TTL);
+    EXPECT_TRUE(before > 0);
+    EXPECT_TRUE(set_unicast_hops(socket->get(), AF_INET, 3).has_value());
+    EXPECT_TRUE(set_unicast_hops(socket->get(), AF_INET, 0).has_value());
+    int const after = read_int_option(socket->get(), IPPROTO_IP, IP_TTL);
+    EXPECT_TRUE(after > 0);
+    EXPECT_TRUE(after != 3);
+}
+
+// The egress interface is pinned to the loopback by index; where the option
+// can be read back it names the same index, and 0 lets the route choose again.
+TEST(net_unicast_send, the_interface_is_pinned_by_index_and_released_by_zero)
+{
+    auto const lo = loopback_index();
+    if (lo == 0) {
+        SKIP("no loopback interface by either name");
+    }
+    auto socket = make_udp_socket();
+    EXPECT_TRUE(socket.has_value());
+    EXPECT_TRUE(set_unicast_interface(socket->get(), AF_INET, lo).has_value());
+#if defined(__linux__)
+    EXPECT_EQ(
+        static_cast<unsigned int>(ntohl(static_cast<uint32_t>(read_int_option(socket->get(), IPPROTO_IP, IP_UNICAST_IF)))), lo);
+#elif defined(IP_BOUND_IF)
+    EXPECT_EQ(static_cast<unsigned int>(read_int_option(socket->get(), IPPROTO_IP, IP_BOUND_IF)), lo);
+#endif
+    EXPECT_TRUE(set_unicast_interface(socket->get(), AF_INET, 0).has_value());
+}
+
+// set_unicast_send is the two writes together, both made whatever the values.
+TEST(net_unicast_send, the_pair_sets_interface_and_hops_together)
+{
+    auto const lo = loopback_index();
+    if (lo == 0) {
+        SKIP("no loopback interface by either name");
+    }
+    auto socket = make_udp_socket();
+    EXPECT_TRUE(socket.has_value());
+    EXPECT_TRUE(set_unicast_send(socket->get(), AF_INET, lo, 9).has_value());
+    EXPECT_EQ(read_int_option(socket->get(), IPPROTO_IP, IP_TTL), 9);
+    EXPECT_TRUE(set_unicast_send(socket->get(), AF_INET, 0, 0).has_value());
+    EXPECT_TRUE(read_int_option(socket->get(), IPPROTO_IP, IP_TTL) != 9);
+}
+
+// A descriptor that is not a socket is refused with the kernel's errno.
+TEST(net_unicast_send, a_bad_descriptor_is_refused)
+{
+    EXPECT_FALSE(set_unicast_hops(-1, AF_INET, 4).has_value());
+#if defined(__linux__) || (defined(IP_BOUND_IF) && defined(IPV6_BOUND_IF))
+    EXPECT_FALSE(set_unicast_interface(-1, AF_INET, 0).has_value());
+#endif
+    EXPECT_FALSE(set_unicast_send(-1, AF_INET, 0, 4).has_value());
+}
+
+// SO_PRIORITY is Linux's: there it reads back, and the unprivileged range is
+// accepted; elsewhere the call is a successful no-op.
+TEST(net_socket_priority, the_priority_reads_back_on_linux_and_is_a_no_op_elsewhere)
+{
+    auto socket = make_udp_socket();
+    EXPECT_TRUE(socket.has_value());
+    EXPECT_TRUE(set_priority(socket->get(), 6).has_value());
+#if defined(__linux__)
+    EXPECT_EQ(read_int_option(socket->get(), SOL_SOCKET, SO_PRIORITY), 6);
+    EXPECT_FALSE(set_priority(-1, 1).has_value());
+#else
+    EXPECT_TRUE(set_priority(-1, 1).has_value());
+#endif
 }
 
 //

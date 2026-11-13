@@ -6,6 +6,7 @@
 #include "statusbar/test/test.hpp"
 
 #include <cstdint>
+#include <functional>
 
 using namespace statusbar;
 using namespace statusbar::net;
@@ -281,6 +282,37 @@ TEST(launch_order, reset_clears_the_late_counters_too)
     order.reset();
     EXPECT_EQ(order.launched_late(), std::uint64_t{0});
     EXPECT_EQ(order.max_late_ns(), std::uint64_t{0});
+}
+
+// A PHC read is the clock's own positive count, as a nanosecond count the
+// ordering can be told.
+TEST(launch_order, phc_now_reads_the_clock_once)
+{
+    int reads = 0;
+    auto const phc = [&reads]() -> std::int64_t {
+        ++reads;
+        return static_cast<std::int64_t>(T);
+    };
+    EXPECT_EQ(phc_now_ns(phc), T);
+    EXPECT_EQ(reads, 1);
+}
+
+// A read of 0 or below is a failed read, and answers 0 as tai_now_ns() does:
+// the commit is unclocked, and the caller sends untimed.
+TEST(launch_order, a_phc_read_that_is_not_positive_is_a_failed_read)
+{
+    EXPECT_EQ(phc_now_ns([]() -> std::int64_t { return 0; }), std::uint64_t{0});
+    EXPECT_EQ(phc_now_ns([]() -> std::int64_t { return -5; }), std::uint64_t{0});
+}
+
+// No clock at all - the nullable callable is empty - is 0 as well, and the
+// callable is not invoked.
+TEST(launch_order, no_phc_at_all_is_a_failed_read)
+{
+    std::function<std::int64_t()> const none;
+    EXPECT_EQ(phc_now_ns(none), std::uint64_t{0});
+    std::function<std::int64_t()> const some = []() -> std::int64_t { return 42; };
+    EXPECT_EQ(phc_now_ns(some), std::uint64_t{42});
 }
 
 TEST_MAIN(statusbar_net, net_launch_order_test)

@@ -68,6 +68,25 @@ namespace statusbar::net {
     return (static_cast<std::uint64_t>(now.tv_sec) * 1'000'000'000ULL) + static_cast<std::uint64_t>(now.tv_nsec);
 }
 
+/// The sending NIC's PHC read through @p phc, for a NIC that reads launch
+/// times in its PHC's time rather than CLOCK_TAI's (AF_XDP TX metadata, the
+/// kernel's xsk-tx-metadata.rst: the launch time is "in the NIC's PHC time").
+/// @p phc is a nullable callable - a ClockFn, a std::function, a lambda - and
+/// is read once; 0 without a clock or when the read is not a positive count,
+/// which is what tai_now_ns() answers on a failed read, so LaunchOrder::next()
+/// treats the commit as unclocked and the caller sends untimed.
+template <typename Clock>
+[[nodiscard]] auto phc_now_ns(Clock const& phc) noexcept -> std::uint64_t
+{
+    if constexpr (std::is_constructible_v<bool, Clock const&>) {
+        if (!static_cast<bool>(phc)) {
+            return 0;  // no clock: a lambda is always one, a ClockFn may be empty
+        }
+    }
+    auto const now = phc();
+    return now > 0 ? static_cast<std::uint64_t>(now) : 0;
+}
+
 /// Hands out launch times that never go backwards, and counts when it had to
 /// hold one.
 class LaunchOrder

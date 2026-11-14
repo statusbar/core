@@ -108,6 +108,13 @@ set_property(CACHE STATUSBAR_CXX_STANDARD PROPERTY STRINGS "23" "26")
 set(CMAKE_CXX_STANDARD ${STATUSBAR_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# No C++ modules anywhere in this tree, and no `import std`. Saying so keeps
+# CMake from scanning every source for module dependencies, and keeps its
+# try_compile() checks (CheckCXXSourceCompiles) from building an `import std`
+# target first - which CMake 4.5 does on a libc++ whose modules.json it can
+# read, and which fails the configure where that libc++'s std.compat module does
+# not build.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # Default build type
 if(NOT CMAKE_BUILD_TYPE)

@@ -2119,7 +2119,8 @@ class XdpContext
 /// frame's TX metadata, as the kernel reports it: the netdev family's
 /// xsk-features, bit NETDEV_XSK_FLAGS_TX_LAUNCH_TIME_FIFO, which Linux 6.15
 /// added together with the feature and a driver sets for the queues that
-/// take a launch time (igc, so far).
+/// take a launch time (igc, so far). The question is asked through
+/// netdev::launch_time_supported(); this is its answer in open()'s terms.
 ///
 /// This is the question open() asks for XdpConfig::tx_launch_time, and not
 /// probe_tx_metadata(): a kernel from 6.8 to 6.14 registers a UMEM with TX
@@ -2138,14 +2139,6 @@ inline constexpr bool xdp_tx_metadata_built = true;
 #    else
 inline constexpr bool xdp_tx_metadata_built = false;
 #    endif
-
-/// The CTRL_ATTR_FAMILY_ID a generic-netlink family lookup answered with, if
-/// the reply holds one. Pure; here for the tests.
-[[nodiscard]] auto genl_family_id_in(std::span<uint8_t const> reply) noexcept -> std::optional<uint16_t>;
-
-/// The NETDEV_A_DEV_XSK_FEATURES a netdev dev-get answered with, if the reply
-/// holds one.
-[[nodiscard]] auto xsk_features_in(std::span<uint8_t const> reply) noexcept -> std::optional<uint64_t>;
 
 }  // namespace detail
 

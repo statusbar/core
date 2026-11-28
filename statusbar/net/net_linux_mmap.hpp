@@ -210,9 +210,14 @@ class MmapContext
     //
 
     /// Start a TX operation, returning a buffer slot to fill.
-    /// The launch_time_ns parameter is used for hardware TX scheduling (TSN/AVB).
     /// If the TX ring is full, returns failure with MmapError::tx_ring_full.
-    /// @param launch_time_ns TSN/AVB launch time in nanoseconds (0 for immediate send)
+    /// @param launch_time_ns accepted and ignored, as RawnetPort and
+    ///        BpfPortContext do: a PACKET_MMAP TX ring has no per-frame launch
+    ///        time. The kernel reads none from the frame header, and one given
+    ///        with SCM_TXTIME holds for every frame of a send call, where
+    ///        tx_flush() sends the ring's whole batch in one. The frame goes
+    ///        out with the next tx_flush(). A caller that needs launch times
+    ///        needs the XDP backend (XdpConfig::tx_launch_time).
     [[nodiscard]] auto tx_start(int64_t launch_time_ns = 0) -> StatusValue<EthernetTxSlot>;
 
     /// Commit a TX slot for transmission.
@@ -276,6 +281,10 @@ class MmapContext
 
   private:
     void swap(MmapContext& other) noexcept;
+
+    /// tx_start()'s second half: the slot at @p hdr, found available, becomes the one in use and the ring's
+    /// index moves on.
+    [[nodiscard]] auto take_tx_slot(tpacket2_hdr* hdr) -> EthernetTxSlot;
 
     /// Get pointer to TX tpacket2_hdr at given index.
     /// Alignment: tx_ring_ is page-aligned (from mmap) and tp_frame_size is

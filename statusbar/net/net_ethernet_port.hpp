@@ -162,6 +162,10 @@ using RxTimePoint = RxClock::time_point;
 /// the told form.
 ///
 /// launch_time_ns is in TAI nanoseconds for TSN/AVB hardware TX scheduling.
+/// It is a request a backend carries where it can and otherwise accepts and
+/// ignores, sending the frame at once: of the backends here only XDP with
+/// XdpConfig::tx_launch_time carries it (net_any_ethernet_port.hpp). 0 asks
+/// for nothing.
 template <typename T>
 concept EthernetPort = requires(
     T& port, T const& cport, uint64_t handle, size_t len, int64_t launch_time_ns, ieee::Eui48 const& mac, RxTimePoint now) {

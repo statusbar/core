@@ -268,8 +268,9 @@ auto MmapContext::close() noexcept -> void
     max_tx_frame_length_ = MMAP_MAX_FRAME_LENGTH;
 }
 
-auto MmapContext::tx_start(int64_t launch_time_ns) -> StatusValue<EthernetTxSlot>
+auto MmapContext::tx_start(int64_t const launch_time_ns) -> StatusValue<EthernetTxSlot>
 {
+    (void)launch_time_ns;  // a PACKET_MMAP TX ring carries no launch time: see the declaration
     if (!valid()) {
         return failure(MmapError::not_open);
     }
@@ -282,7 +283,11 @@ auto MmapContext::tx_start(int64_t launch_time_ns) -> StatusValue<EthernetTxSlot
     if (load_status(hdr) != TP_STATUS_AVAILABLE) {
         return failure(MmapError::tx_ring_full);
     }
+    return success(take_tx_slot(hdr));
+}
 
+auto MmapContext::take_tx_slot(tpacket2_hdr* const hdr) -> EthernetTxSlot
+{
     // Store index for commit/cancel
     size_t const slot_index = tx_index_;
     tx_slot_in_use_ = static_cast<uint64_t>(slot_index);
@@ -290,20 +295,16 @@ auto MmapContext::tx_start(int64_t launch_time_ns) -> StatusValue<EthernetTxSlot
     // Advance TX index (wrap around)
     tx_index_ = (tx_index_ + 1) % tx_req_.tp_frame_nr;
 
-    // Set launch time if specified
-    if (launch_time_ns > 0) {
-        hdr->tp_sec = static_cast<uint32_t>(launch_time_ns / 1'000'000'000);
-        hdr->tp_nsec = static_cast<uint32_t>(launch_time_ns % 1'000'000'000);
-    } else {
-        hdr->tp_sec = 0;
-        hdr->tp_nsec = 0;
-    }
+    // tpacket_snd() reads neither field of a frame it sends: they are where the kernel hands back a TX
+    // timestamp (PACKET_TIMESTAMP). Cleared so that a stale one is never read as this frame's.
+    hdr->tp_sec = 0;
+    hdr->tp_nsec = 0;
 
     // Return slot with buffer pointing to payload area
-    return success(EthernetTxSlot{
+    return EthernetTxSlot{
         .handle = static_cast<uint64_t>(slot_index),
         .buffer = std::span<uint8_t>(tx_payload(hdr), max_tx_frame_length_),
-    });
+    };
 }
 
 auto MmapContext::tx_commit(uint64_t handle, size_t frame_length) -> Status

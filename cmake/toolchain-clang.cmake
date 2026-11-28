@@ -168,8 +168,16 @@ endif()
 # other than the pinned one opt out with -DENABLE_WARNINGS_AS_ERRORS=OFF.
 # Statically link the C++ runtime into executables. One flag pair covers both
 # toolchains: GCC links libstdc++ and libgcc; clang links libc++, libc++abi and
-# the libgcc unwinder. Either way the C++ runtime leaves the binary's dynamic
+# an unwinder. Either way the C++ runtime leaves the binary's dynamic
 # dependencies entirely.
+#
+# The unwinder is named, because under --rtlib=compiler-rt a clang takes the one
+# its own build defaults to. Debian's takes libgcc (it links libgcc_eh.a), so
+# the flag pair alone worked there. A clang built with the upstream default
+# takes none: -static-libgcc is then an unused argument, an error under -Werror,
+# and libc++abi.a is left with no _Unwind_* to link against.
+# STATUSBAR_STATIC_UNWINDLIB picks it: libgcc (the default, what Debian's clang
+# did by itself) or libunwind, LLVM's, for a toolchain with no libgcc.
 #
 # This decouples the build compiler from the runtime present on the target. A
 # C++26 GCC 16 binary needs GLIBCXX_3.4.36, which Debian trixie (libstdc++
@@ -185,10 +193,20 @@ endif()
 # only place this belongs.
 option(ENABLE_STATIC_CXX_RUNTIME
        "Statically link the C++ runtime into executables" OFF)
+set(STATUSBAR_STATIC_UNWINDLIB
+    "libgcc"
+    CACHE STRING
+          "Unwinder of a static C++ runtime on Linux: libgcc or libunwind")
+set_property(CACHE STATUSBAR_STATIC_UNWINDLIB PROPERTY STRINGS libgcc libunwind)
 set(_STATUSBAR_EXE_LINKER_FLAGS "")
 if(ENABLE_STATIC_CXX_RUNTIME)
   message(STATUS "Static C++ runtime enabled (executables)")
   list(APPEND _STATUSBAR_EXE_LINKER_FLAGS -static-libstdc++ -static-libgcc)
+  if(NOT APPLE)
+    message(STATUS "Static C++ runtime unwinder: ${STATUSBAR_STATIC_UNWINDLIB}")
+    list(APPEND _STATUSBAR_EXE_LINKER_FLAGS
+         --unwindlib=${STATUSBAR_STATIC_UNWINDLIB})
+  endif()
 endif()
 
 option(ENABLE_WARNINGS_AS_ERRORS "Warning is an error" ON)
